@@ -1,0 +1,65 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background -->
+  <rect width="512" height="512" rx="96" fill="url(#gradient)"/>
+  
+  <!-- Terminal Window -->
+  <rect x="80" y="100" width="352" height="280" rx="24" fill="#1e293b" stroke="#334155" stroke-width="4"/>
+  
+  <!-- Title Bar -->
+  <rect x="80" y="100" width="352" height="48" rx="24" fill="#334155"/>
+  <rect x="80" y="124" width="352" height="24" fill="#334155"/>
+  
+  <!-- Window Buttons -->
+  <circle cx="116" cy="124" r="10" fill="#ef4444"/>
+  <circle cx="148" cy="124" r="10" fill="#f59e0b"/>
+  <circle cx="180" cy="124" r="10" fill="#10b981"/>
+  
+  <!-- Terminal Content -->
+  <!-- TX Line -->
+  <rect x="108" y="172" width="36" height="20" rx="4" fill="#f59e0b"/>
+  <text x="114" y="187" font-family="monospace" font-size="12" font-weight="bold" fill="#1e293b">TX</text>
+  <rect x="152" y="172" width="180" height="20" rx="4" fill="#475569"/>
+  
+  <!-- RX Line -->
+  <rect x="108" y="204" width="36" height="20" rx="4" fill="#10b981"/>
+  <text x="114" y="219" font-family="monospace" font-size="12" font-weight="bold" fill="#1e293b">RX</text>
+  <rect x="152" y="204" width="240" height="20" rx="4" fill="#475569"/>
+  
+  <!-- TX Line 2 -->
+  <rect x="108" y="236" width="36" height="20" rx="4" fill="#f59e0b"/>
+  <text x="114" y="251" font-family="monospace" font-size="12" font-weight="bold" fill="#1e293b">TX</text>
+  <rect x="152" y="236" width="120" height="20" rx="4" fill="#475569"/>
+  
+  <!-- RX Line 2 -->
+  <rect x="108" y="268" width="36" height="20" rx="4" fill="#10b981"/>
+  <text x="114" y="283" font-family="monospace" font-size="12" font-weight="bold" fill="#1e293b">RX</text>
+  <rect x="152" y="268" width="200" height="20" rx="4" fill="#475569"/>
+  
+  <!-- Cursor -->
+  <rect x="108" y="300" width="12" height="24" rx="2" fill="#0ea5e9">
+    <animate attributeName="opacity" values="1;0;1" dur="1s" repeatCount="indefinite"/>
+  </rect>
+  
+  <!-- USB Connector Symbol -->
+  <g transform="translate(340, 320)">
+    <rect x="0" y="0" width="72" height="44" rx="8" fill="#0ea5e9"/>
+    <rect x="8" y="8" width="56" height="28" rx="4" fill="#1e293b"/>
+    <circle cx="20" cy="22" r="6" fill="#0ea5e9"/>
+    <circle cx="52" cy="22" r="6" fill="#0ea5e9"/>
+  </g>
+  
+  <!-- Signal Waves -->
+  <path d="M440 140 L456 140 L460 120 L468 160 L476 120 L484 160 L488 140 L504 140" 
+        stroke="#0ea5e9" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <animate attributeName="opacity" values="0.5;1;0.5" dur="1.5s" repeatCount="indefinite"/>
+  </path>
+  
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#0ea5e9"/>
+      <stop offset="100%" style="stop-color:#0284c7"/>
+    </linearGradient>
+  </defs>
+</svg>
+
+
