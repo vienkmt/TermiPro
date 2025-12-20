@@ -25,9 +25,13 @@ const emit = defineEmits(['connect', 'disconnect', 'refreshPorts']);
 
 const t = inject('t');
 
+// Constants
+const MAX_TERMINAL_ENTRIES = 500;
+
 // Local refs for dropdowns
 const openDropdown = ref(null);
 const terminalRef = ref(null);
+const scrollPending = ref(false);
 
 // Config options
 const baudRateOptions = [9600, 19200, 57600, 115200, 460800, 921600];
@@ -36,9 +40,21 @@ const stopBitsOptions = ['1', '1.5', '2'];
 const parityOptions = ['none', 'odd', 'even'];
 const lineEndingOptions = ['None', 'CR', 'LF', 'CRLF'];
 
-// Computed
-const rxCount = computed(() => props.tabState.terminalData.filter(e => e.type === 'rx').length);
-const txCount = computed(() => props.tabState.terminalData.filter(e => e.type === 'tx').length);
+// Helper to add terminal entry with limit
+function addTerminalEntry(entry) {
+  // Trim old entries if exceeding limit
+  if (props.tabState.terminalData.length >= MAX_TERMINAL_ENTRIES) {
+    const removed = props.tabState.terminalData.shift();
+    if (removed.type === 'tx') props.tabState.txCount--;
+    else props.tabState.rxCount--;
+  }
+
+  props.tabState.terminalData.push(entry);
+  if (entry.type === 'tx') props.tabState.txCount++;
+  else props.tabState.rxCount++;
+
+  throttledScrollToBottom();
+}
 
 // Format baud rate với dấu chấm
 function formatBaudRate(rate) {
@@ -158,13 +174,11 @@ async function sendMessage() {
       dataBytes.push(...getLineEndingBytes());
     }
 
-    props.tabState.terminalData.push({
+    addTerminalEntry({
       type: 'tx',
       data: dataBytes,
       timestamp,
     });
-
-    scrollToBottom();
   } catch (error) {
     console.error('Error sending data:', error);
     alert('Error: ' + error);
@@ -206,14 +220,13 @@ async function doAutoSend() {
       dataBytes.push(...getLineEndingBytes());
     }
 
-    props.tabState.terminalData.push({
+    addTerminalEntry({
       type: 'tx',
       data: dataBytes,
       timestamp,
     });
 
     props.tabState.autoSendCount++;
-    scrollToBottom();
   } catch (error) {
     console.error('Auto send error:', error);
     stopAutoSend();
@@ -252,25 +265,26 @@ function stopAutoSend() {
 // Terminal helpers
 function clearTerminal() {
   props.tabState.terminalData.splice(0, props.tabState.terminalData.length);
+  props.tabState.txCount = 0;
+  props.tabState.rxCount = 0;
 }
 
 function scrollToBottom() {
-  if (props.tabState.autoScroll) {
-    nextTick(() => {
-      if (terminalRef.value) {
-        terminalRef.value.scrollTop = terminalRef.value.scrollHeight;
-      }
-    });
+  if (props.tabState.autoScroll && terminalRef.value) {
+    terminalRef.value.scrollTop = terminalRef.value.scrollHeight;
   }
 }
 
-// Watch for new terminal data to auto scroll
-watch(
-  () => props.tabState.terminalData.length,
-  () => {
-    scrollToBottom();
+// Throttled scroll - only scroll once per animation frame
+function throttledScrollToBottom() {
+  if (!scrollPending.value && props.tabState.autoScroll) {
+    scrollPending.value = true;
+    requestAnimationFrame(() => {
+      scrollToBottom();
+      scrollPending.value = false;
+    });
   }
-);
+}
 
 // Lifecycle
 onMounted(() => {
@@ -598,11 +612,11 @@ onUnmounted(() => {
         <div class="terminal-stats" v-if="tabState.terminalData.length > 0">
           <span class="stat-item tx">
             <span class="stat-arrow">↑</span>
-            TX {{ txCount }}
+            TX {{ tabState.txCount }}
           </span>
           <span class="stat-item rx">
             <span class="stat-arrow">↓</span>
-            RX {{ rxCount }}
+            RX {{ tabState.rxCount }}
           </span>
         </div>
         <button class="btn-clear" @click="clearTerminal">

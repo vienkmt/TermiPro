@@ -30,6 +30,8 @@ export function useTabStore() {
 
       // Terminal data
       terminalData: [],
+      txCount: 0,
+      rxCount: 0,
       inputMessage: '',
 
       // Serial configuration

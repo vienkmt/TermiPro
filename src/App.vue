@@ -118,6 +118,9 @@ provide('toggleLanguage', toggleLanguage);
 const tabStore = useTabStore();
 const { tabs, activeTabId, tabOrder, activeTab, canAddTab, createTab, closeTab, setActiveTab, getTabByPortName, getConnectedPorts } = tabStore;
 
+// Constants
+const MAX_TERMINAL_ENTRIES = 500;
+
 // Available ports
 const ports = ref([]);
 
@@ -259,11 +262,19 @@ onMounted(async () => {
     // Find the tab that owns this port
     const tab = getTabByPortName(port_name);
     if (tab) {
+      // Limit terminal entries
+      if (tab.terminalData.length >= MAX_TERMINAL_ENTRIES) {
+        const removed = tab.terminalData.shift();
+        if (removed.type === 'tx') tab.txCount--;
+        else tab.rxCount--;
+      }
+
       tab.terminalData.push({
         type: "rx",
         data: data,
         timestamp: new Date(timestamp).toLocaleTimeString(),
       });
+      tab.rxCount++;
     }
   });
 });
