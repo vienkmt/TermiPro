@@ -63,10 +63,8 @@ export function useTabStore() {
     tabs.set(id, tabState);
     tabOrder.value.push(id);
 
-    // Set as active if it's the first tab
-    if (tabs.size === 1) {
-      activeTabId.value = id;
-    }
+    // Always set new tab as active
+    activeTabId.value = id;
 
     return id;
   }

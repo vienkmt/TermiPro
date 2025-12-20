@@ -151,14 +151,20 @@ function isTabConnected(tabId) {
 }
 
 .tab.active {
-  background: var(--bg-primary);
-  border-color: var(--border-color);
-  border-bottom-color: var(--bg-primary);
+  background: var(--accent-light);
+  border-color: var(--accent-primary);
+  border-bottom-color: var(--accent-light);
   margin-bottom: -1px;
+  box-shadow: 0 -2px 8px rgba(14, 165, 233, 0.15);
 }
 
 .tab.active .tab-icon {
   color: var(--accent-primary);
+}
+
+.tab.active .tab-name {
+  color: var(--accent-primary);
+  font-weight: 700;
 }
 
 .tab-icon {
