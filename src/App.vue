@@ -342,18 +342,19 @@ onUnmounted(async () => {
 
     <!-- Main Content - Tabs -->
     <div class="main-content">
-      <SerialTab
-        v-for="[tabId, tabState] in tabs"
-        v-show="tabId === activeTabId"
-        :key="tabId"
-        :tab-id="tabId"
-        :tab-state="tabState"
-        :ports="ports"
-        :connected-ports="connectedPorts"
-        @connect="handleConnect"
-        @disconnect="handleDisconnect"
-        @refresh-ports="refreshPorts"
-      />
+      <KeepAlive :max="8">
+        <SerialTab
+          v-if="activeTab"
+          :key="activeTabId"
+          :tab-id="activeTabId"
+          :tab-state="activeTab"
+          :ports="ports"
+          :connected-ports="connectedPorts"
+          @connect="handleConnect"
+          @disconnect="handleDisconnect"
+          @refresh-ports="refreshPorts"
+        />
+      </KeepAlive>
     </div>
 
     <!-- Confirm Dialog -->
