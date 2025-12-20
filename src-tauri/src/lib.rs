@@ -28,6 +28,7 @@ pub struct SerialConfig {
 // Dữ liệu nhận được từ serial
 #[derive(Debug, Serialize, Clone)]
 pub struct SerialData {
+    pub port_name: String,
     pub data: Vec<u8>,
     pub timestamp: u64,
 }
@@ -182,6 +183,7 @@ fn open_port(
             if let Some(n) = bytes_read {
                 if n > 0 {
                     let data = SerialData {
+                        port_name: port_name_clone.clone(),
                         data: buffer[..n].to_vec(),
                         timestamp: std::time::SystemTime::now()
                             .duration_since(std::time::UNIX_EPOCH)
