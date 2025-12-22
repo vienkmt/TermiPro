@@ -1,9 +1,12 @@
 name: Build TermiPro
 on:
   push:
-    branches: [main, master]
-  pull_request:
-    branches: [main, master]
+    branches: [main]
+    paths-ignore:
+      - '**.md'
+      - '**.txt'
+      - 'LICENSE'
+      - '.gitignore'
   workflow_dispatch:
 
 jobs:
@@ -25,14 +28,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target x86_64-pc-windows-msvc
-      - name: Upload Windows artifacts
+          args: --target x86_64-pc-windows-msvc --bundles msi
+      - name: Upload Windows MSI
         uses: actions/upload-artifact@v4
         with:
           name: TermiPro-Windows
-          path: |
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
-            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          if-no-files-found: error
 
   build-macos:
     runs-on: macos-latest
@@ -55,8 +57,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: --target aarch64-apple-darwin
-      - name: Upload macOS artifacts
+      - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
           name: TermiPro-macOS
           path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: error
