@@ -56,6 +56,22 @@ const translations = {
     closeTabWarning: "Cổng serial đang kết nối. Bạn có muốn ngắt kết nối và đóng tab?",
     cancel: "Hủy",
     maxTabsReached: "Đã đạt giới hạn tab",
+    // Signal Help
+    signalHelp: "Trợ giúp tín hiệu",
+    signalHelpTitle: "Tín hiệu điều khiển",
+    dtrMeaning: "Máy tính đã sẵn sàng",
+    rtsMeaning: "Tôi muốn gửi dữ liệu",
+    dtrDesc: "Tín hiệu từ máy tính → thiết bị. Khi bật, báo cho thiết bị biết máy tính đang lắng nghe.",
+    rtsDesc: "Tín hiệu từ máy tính → thiết bị. Một số module dùng để điều khiển nguồn hoặc chế độ hoạt động.",
+    whenToUse: "Khi nào cần bật",
+    dtrCase1Label: "Arduino - reset khi kết nối",
+    dtrCase2Label: "Arduino - không reset",
+    dtrCase3Label: "ESP32/ESP8266 - chế độ flash",
+    rtsCase1Label: "ESP32/ESP8266 - chế độ flash",
+    rtsCase2Label: "Một số module RS485",
+    rtsCase3Label: "Đọc dữ liệu bình thường",
+    signalSummary: "90% trường hợp: Để cả 2 OFF (mặc định)",
+    signalNote: "Chỉ bật khi thiết bị không hoạt động hoặc tài liệu yêu cầu.",
   },
   en: {
     // Status
@@ -102,6 +118,22 @@ const translations = {
     closeTabWarning: "Serial port is connected. Disconnect and close tab?",
     cancel: "Cancel",
     maxTabsReached: "Maximum tabs reached",
+    // Signal Help
+    signalHelp: "Signal help",
+    signalHelpTitle: "Control Signals",
+    dtrMeaning: "Computer is ready",
+    rtsMeaning: "I want to send data",
+    dtrDesc: "Signal from computer → device. When enabled, tells the device the computer is listening.",
+    rtsDesc: "Signal from computer → device. Some modules use it for power control or operating mode.",
+    whenToUse: "When to enable",
+    dtrCase1Label: "Arduino - reset on connect",
+    dtrCase2Label: "Arduino - no reset",
+    dtrCase3Label: "ESP32/ESP8266 - flash mode",
+    rtsCase1Label: "ESP32/ESP8266 - flash mode",
+    rtsCase2Label: "Some RS485 modules",
+    rtsCase3Label: "Normal data reading",
+    signalSummary: "90% of cases: Keep both OFF (default)",
+    signalNote: "Only enable when device doesn't work or documentation requires it.",
   }
 };
 
@@ -204,6 +236,8 @@ async function handleConnect(tabId) {
       data_bits: tab.dataBits,
       stop_bits: tab.stopBits,
       parity: tab.parity,
+      dtr: tab.dtr,
+      rts: tab.rts,
     };
 
     await invoke("open_port", { config });
@@ -236,19 +270,24 @@ async function handleDisconnect(tabId) {
   }
 }
 
-function requestCloseTab(tabId) {
+async function requestCloseTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
+  // Auto disconnect if connected
   if (tab.isConnected) {
-    pendingCloseTabId.value = tabId;
-    showConfirmDialog.value = true;
-  } else {
-    closeTab(tabId);
-    // Create new tab if all tabs are closed
-    if (tabs.size === 0) {
-      createTab();
+    try {
+      await invoke("close_port", { portName: tab.selectedPort });
+      tab.isConnected = false;
+    } catch (error) {
+      console.error("Error closing port:", error);
     }
+  }
+
+  closeTab(tabId);
+  // Create new tab if all tabs are closed
+  if (tabs.size === 0) {
+    createTab();
   }
 }
 
