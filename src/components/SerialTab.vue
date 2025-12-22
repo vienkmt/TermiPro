@@ -50,8 +50,13 @@ function addTerminalEntry(entry) {
   }
 
   props.tabState.terminalData.push(entry);
-  if (entry.type === 'tx') props.tabState.txCount++;
-  else props.tabState.rxCount++;
+  if (entry.type === 'tx') {
+    props.tabState.txCount++;
+    props.tabState.totalTxCount++;
+  } else {
+    props.tabState.rxCount++;
+    props.tabState.totalRxCount++;
+  }
 
   throttledScrollToBottom();
 }
@@ -158,6 +163,7 @@ async function sendMessage() {
       portName: props.tabState.selectedPort,
       data: dataToSend,
       isHex: props.tabState.sendAsHex,
+      byteDelayUs: props.tabState.byteDelay > 0 ? props.tabState.byteDelay : null,
     });
 
     // Add to terminal as TX
@@ -192,9 +198,14 @@ function handleKeyDown(event) {
   }
 }
 
-// Auto send
+// Auto send with backpressure
 async function doAutoSend() {
   if (!props.tabState.autoSendCurrentMessage || !props.tabState.isConnected) return;
+
+  // Backpressure: skip if previous send still in progress
+  if (props.tabState.autoSendInProgress) return;
+
+  props.tabState.autoSendInProgress = true;
 
   try {
     const dataToSend = props.tabState.sendAsHex
@@ -205,6 +216,7 @@ async function doAutoSend() {
       portName: props.tabState.selectedPort,
       data: dataToSend,
       isHex: props.tabState.sendAsHex,
+      byteDelayUs: props.tabState.byteDelay > 0 ? props.tabState.byteDelay : null,
     });
 
     const timestamp = new Date().toLocaleTimeString();
@@ -230,6 +242,8 @@ async function doAutoSend() {
   } catch (error) {
     console.error('Auto send error:', error);
     stopAutoSend();
+  } finally {
+    props.tabState.autoSendInProgress = false;
   }
 }
 
@@ -267,6 +281,8 @@ function clearTerminal() {
   props.tabState.terminalData.splice(0, props.tabState.terminalData.length);
   props.tabState.txCount = 0;
   props.tabState.rxCount = 0;
+  props.tabState.totalTxCount = 0;
+  props.tabState.totalRxCount = 0;
 }
 
 function scrollToBottom() {
@@ -285,6 +301,14 @@ function throttledScrollToBottom() {
     });
   }
 }
+
+// Watch for terminal data changes (RX from App.vue) and auto-scroll
+watch(
+  () => props.tabState.terminalData.length,
+  () => {
+    throttledScrollToBottom();
+  }
+);
 
 // Lifecycle
 onMounted(() => {
@@ -592,6 +616,22 @@ onUnmounted(() => {
               <span class="interval-unit">ms</span>
             </div>
           </div>
+          <div class="config-row-inline">
+            <label>Byte Delay</label>
+            <div class="interval-group">
+              <input
+                type="number"
+                v-model.number="tabState.byteDelay"
+                min="0"
+                max="10000"
+                step="100"
+                :disabled="tabState.autoSendEnabled"
+                class="interval-input"
+                title="Inter-byte delay for slow devices (0 = disabled)"
+              />
+              <span class="interval-unit">µs</span>
+            </div>
+          </div>
           <div class="auto-send-info" v-if="tabState.autoSendEnabled">
             <span class="send-count">{{ t.sent }}: {{ tabState.autoSendCount }} {{ t.times }}</span>
           </div>
@@ -609,14 +649,14 @@ onUnmounted(() => {
           </svg>
           <span>{{ t.terminal }}</span>
         </div>
-        <div class="terminal-stats" v-if="tabState.terminalData.length > 0">
+        <div class="terminal-stats" v-if="tabState.totalTxCount > 0 || tabState.totalRxCount > 0">
           <span class="stat-item tx">
             <span class="stat-arrow">↑</span>
-            TX {{ tabState.txCount }}
+            TX {{ tabState.totalTxCount }}
           </span>
           <span class="stat-item rx">
             <span class="stat-arrow">↓</span>
-            RX {{ tabState.rxCount }}
+            RX {{ tabState.totalRxCount }}
           </span>
         </div>
         <button class="btn-clear" @click="clearTerminal">

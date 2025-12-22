@@ -32,6 +32,8 @@ export function useTabStore() {
       terminalData: [],
       txCount: 0,
       rxCount: 0,
+      totalTxCount: 0, // Tổng số TX đã gửi (không reset khi xóa entries)
+      totalRxCount: 0, // Tổng số RX đã nhận (không reset khi xóa entries)
       inputMessage: '',
 
       // Serial configuration
@@ -46,6 +48,10 @@ export function useTabStore() {
       autoSendCount: 0,
       autoSendCurrentMessage: '',
       autoSendTimer: null,
+      autoSendInProgress: false, // Backpressure flag
+
+      // Performance settings
+      byteDelay: 0, // Inter-byte delay in microseconds (0 = disabled)
 
       // Display settings
       displayMode: 'text',
