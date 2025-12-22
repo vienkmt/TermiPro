@@ -545,13 +545,7 @@ onUnmounted(() => {
                 <span class="toggle-label">RTS</span>
               </label>
             </div>
-            <button class="btn-signal-help" @click="showSignalHelp = true" :title="t.signalHelp">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-                <circle cx="12" cy="12" r="10"/>
-                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/>
-                <line x1="12" y1="17" x2="12.01" y2="17"/>
-              </svg>
-            </button>
+            <button class="btn-signal-help" @click="showSignalHelp = true" :title="t.signalHelp">?</button>
           </div>
         </div>
       </div>
@@ -1140,12 +1134,14 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: 18px;
+  height: 18px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: 50%;
   color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
   cursor: pointer;
   transition: all 0.2s ease;
 }
