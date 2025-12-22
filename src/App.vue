@@ -2,6 +2,8 @@
 import { ref, computed, provide, onMounted, onUnmounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getVersion } from "@tauri-apps/api/app";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import TabBar from "./components/TabBar.vue";
 import SerialTab from "./components/SerialTab.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
@@ -305,6 +307,14 @@ function handleDeviceDisconnected(portName, reason) {
 
 // Lifecycle
 onMounted(async () => {
+  // Set window title with version
+  try {
+    const version = await getVersion();
+    await getCurrentWindow().setTitle(`TermiPro by vienkmt - v${version}`);
+  } catch (e) {
+    console.warn('Could not set window title:', e);
+  }
+
   // Create initial tab
   createTab();
 
