@@ -35,3 +35,11 @@ dist-ssr
 ._*
 .Spotlight-V100
 .Trashes
+
+# Secret keys - NEVER commit these!
+*.key
+*.key.pub
+sercret key/
+secret key/
+secrets/
+.tauri/
