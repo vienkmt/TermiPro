@@ -33,6 +33,14 @@ pub struct SerialData {
     pub timestamp: u64,
 }
 
+// Event khi port bị ngắt kết nối
+#[derive(Debug, Serialize, Clone)]
+pub struct PortDisconnected {
+    pub port_name: String,
+    pub reason: String,
+    pub timestamp: u64,
+}
+
 // Quản lý trạng thái serial port
 pub struct SerialState {
     ports: Mutex<HashMap<String, Arc<Mutex<Box<dyn SerialPort>>>>>,
@@ -48,27 +56,60 @@ impl Default for SerialState {
     }
 }
 
-// Liệt kê các cổng serial có sẵn (chỉ /dev/tty* USB)
+// Liệt kê các cổng serial có sẵn (hỗ trợ Windows, Linux, macOS)
 #[tauri::command]
 fn list_serial_ports() -> Result<Vec<PortInfo>, String> {
     let ports = serialport::available_ports().map_err(|e| e.to_string())?;
 
     let port_list: Vec<PortInfo> = ports
         .into_iter()
-        // Chỉ lấy USB ports với đường dẫn /dev/tty*, loại trừ usbmodem
         .filter(|p| {
-            matches!(p.port_type, serialport::SerialPortType::UsbPort(_))
-                && p.port_name.contains("/dev/tty")
-                && !p.port_name.contains("usbmodem")
+            // Chỉ lấy USB ports
+            if !matches!(p.port_type, serialport::SerialPortType::UsbPort(_)) {
+                return false;
+            }
+
+            let name = &p.port_name;
+
+            // Windows: COMx (COM1, COM2, ...)
+            #[cfg(target_os = "windows")]
+            {
+                name.starts_with("COM")
+            }
+
+            // Linux: /dev/ttyUSB*, /dev/ttyACM*, /dev/ttyS*
+            #[cfg(target_os = "linux")]
+            {
+                name.starts_with("/dev/ttyUSB")
+                    || name.starts_with("/dev/ttyACM")
+                    || name.starts_with("/dev/ttyS")
+            }
+
+            // macOS: /dev/tty.* (loại trừ usbmodem)
+            #[cfg(target_os = "macos")]
+            {
+                name.starts_with("/dev/tty.") && !name.contains("usbmodem")
+            }
+
+            // Fallback cho các OS khác
+            #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "macos")))]
+            {
+                true
+            }
         })
         .map(|p| {
-            // Lấy phần cuối của tên port (vd: tty.usbserial-1420)
-            let short_name = p.port_name
-                .split('/')
-                .last()
-                .unwrap_or(&p.port_name)
-                .to_string();
-            
+            let short_name = if cfg!(target_os = "windows") {
+                // Windows: giữ nguyên tên (COM1, COM2, ...)
+                p.port_name.clone()
+            } else {
+                // Unix-like: lấy phần cuối sau dấu /
+                p.port_name
+                    .split('/')
+                    .last()
+                    .unwrap_or(&p.port_name)
+                    .to_string()
+            };
+
             PortInfo {
                 name: p.port_name,
                 port_type: short_name,
@@ -152,6 +193,7 @@ fn open_port(
 
     thread::spawn(move || {
         let mut buffer = [0u8; 1024];
+        let mut disconnect_reason: Option<String> = None;
 
         loop {
             // Kiểm tra xem có nên tiếp tục đọc không
@@ -171,11 +213,14 @@ fn open_port(
                     match port.read(&mut buffer) {
                         Ok(n) => Some(n),
                         Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => None,
-                        Err(_) => {
+                        Err(e) => {
+                            // Lưu lý do ngắt kết nối
+                            disconnect_reason = Some(format!("{}", e));
                             break;
                         }
                     }
                 } else {
+                    disconnect_reason = Some("Port không tồn tại".to_string());
                     break;
                 }
             };
@@ -195,6 +240,31 @@ fn open_port(
             }
 
             thread::sleep(Duration::from_millis(10));
+        }
+
+        // Nếu có lỗi (thiết bị bị rút), emit event thông báo
+        if let Some(reason) = disconnect_reason {
+            // Cleanup state
+            let state = unsafe { &*(state_ptr as *const SerialState) };
+            {
+                let mut ports = state.ports.lock();
+                ports.remove(&port_name_clone);
+            }
+            {
+                let mut running = state.running.lock();
+                running.remove(&port_name_clone);
+            }
+
+            // Emit event về frontend
+            let event = PortDisconnected {
+                port_name: port_name_clone.clone(),
+                reason,
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            };
+            let _ = app_clone.emit("serial-disconnected", event);
         }
     });
 
