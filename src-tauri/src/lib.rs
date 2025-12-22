@@ -25,6 +25,8 @@ pub struct SerialConfig {
     pub data_bits: u8,
     pub stop_bits: String,
     pub parity: String,
+    pub dtr: bool,
+    pub rts: bool,
 }
 
 // Dữ liệu nhận được từ serial
@@ -115,7 +117,15 @@ fn list_serial_ports() -> Result<Vec<PortInfo>, String> {
             // Lấy thông tin USB nếu có
             let (manufacturer, product) = match &p.port_type {
                 serialport::SerialPortType::UsbPort(usb_info) => {
-                    (usb_info.manufacturer.clone(), usb_info.product.clone())
+                    let mut prod = usb_info.product.clone();
+                    // Windows: loại bỏ hậu tố (COMx) từ product name
+                    #[cfg(target_os = "windows")]
+                    if let Some(ref p) = prod {
+                        if let Some(idx) = p.rfind(" (COM") {
+                            prod = Some(p[..idx].to_string());
+                        }
+                    }
+                    (usb_info.manufacturer.clone(), prod)
                 }
                 _ => (None, None),
             };
@@ -175,7 +185,7 @@ fn open_port(
     };
 
     // Mở serial port với timeout ngắn để poll nhanh
-    let port = serialport::new(&port_name, config.baud_rate)
+    let mut port = serialport::new(&port_name, config.baud_rate)
         .data_bits(data_bits)
         .stop_bits(stop_bits)
         .parity(parity)
@@ -183,6 +193,12 @@ fn open_port(
         .timeout(Duration::from_millis(5)) // Timeout ngắn để responsive
         .open()
         .map_err(|e| format!("Không thể mở port {}: {}", port_name, e))?;
+
+    // Set DTR và RTS
+    port.write_data_terminal_ready(config.dtr)
+        .map_err(|e| format!("Không thể set DTR: {}", e))?;
+    port.write_request_to_send(config.rts)
+        .map_err(|e| format!("Không thể set RTS: {}", e))?;
 
     let port = Arc::new(Mutex::new(port));
 
