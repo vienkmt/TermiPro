@@ -3,7 +3,7 @@ name: Build TermiPro
 # Chỉ build khi push code (không phải tag)
 on:
   push:
-    branches: [main, dev]
+    branches: [main]
     paths-ignore:
       - '**.md'
       - '**.txt'
