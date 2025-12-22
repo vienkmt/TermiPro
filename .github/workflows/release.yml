@@ -1,0 +1,86 @@
+name: Release TermiPro
+
+# Chỉ chạy khi push tag
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Get version from tag
+        id: version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download artifacts from latest build
+        uses: dawidd6/action-download-artifact@v3
+        with:
+          workflow: build.yml
+          name: TermiPro-Windows-Setup
+          path: artifacts/windows
+          search_artifacts: true
+
+      - name: List downloaded files
+        run: |
+          echo "Downloaded files:"
+          ls -la artifacts/windows/
+
+      - name: Create latest.json for updater
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+
+          # Find the exe and sig files
+          SETUP_FILE=$(ls artifacts/windows/*.exe 2>/dev/null | head -1)
+          SIG_FILE=$(ls artifacts/windows/*.sig 2>/dev/null | head -1)
+
+          if [ -z "$SETUP_FILE" ] || [ -z "$SIG_FILE" ]; then
+            echo "Error: Could not find setup or signature files"
+            ls -la artifacts/windows/
+            exit 1
+          fi
+
+          SETUP_FILENAME=$(basename "$SETUP_FILE")
+
+          # Read signature
+          SIGNATURE=$(cat "$SIG_FILE")
+
+          # Create latest.json
+          cat > artifacts/latest.json << EOF
+          {
+            "version": "$VERSION",
+            "notes": "See the release notes at https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "$SIGNATURE",
+                "url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$SETUP_FILENAME"
+              }
+            }
+          }
+          EOF
+
+          echo "Created latest.json:"
+          cat artifacts/latest.json
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/windows/*.exe
+            artifacts/windows/*.sig
+            artifacts/latest.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
