@@ -85,26 +85,20 @@ function getLineEndingStr() {
   }
 }
 
-// Format data for display
-function formatByte(byte) {
-  if (props.tabState.displayMode === 'hex') {
-    return byte.toString(16).padStart(2, '0').toUpperCase();
-  }
-  if (byte >= 32 && byte <= 126) {
-    return String.fromCharCode(byte);
-  } else if (byte === 10) {
-    return '\n';
-  } else if (byte === 13) {
-    return '';
-  }
-  return '.';
-}
+// TextDecoder for UTF-8 (supports Vietnamese)
+const textDecoder = new TextDecoder('utf-8', { fatal: false });
 
+// Format data for display
 function formatDataLine(entry) {
   if (props.tabState.displayMode === 'hex') {
     return entry.data.map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
   }
-  return entry.data.map(b => formatByte(b)).join('');
+  // Decode UTF-8 bytes to string (supports Vietnamese and other Unicode)
+  const uint8Array = new Uint8Array(entry.data);
+  let text = textDecoder.decode(uint8Array);
+  // Remove carriage return for cleaner display
+  text = text.replace(/\r/g, '');
+  return text;
 }
 
 // Dropdown handlers
@@ -350,7 +344,12 @@ onUnmounted(() => {
                   <line x1="1" y1="15" x2="4" y2="15"/>
                 </svg>
                 <span v-if="!tabState.selectedPort" class="placeholder">{{ t.selectPort }}</span>
-                <span v-else class="selected-port">{{ ports.find(p => p.name === tabState.selectedPort)?.port_type || tabState.selectedPort }}</span>
+                <div v-else class="selected-port-info">
+                  <span class="selected-port">{{ ports.find(p => p.name === tabState.selectedPort)?.port_type || tabState.selectedPort }}</span>
+                  <span class="selected-device" v-if="ports.find(p => p.name === tabState.selectedPort)?.product || ports.find(p => p.name === tabState.selectedPort)?.manufacturer">
+                    {{ ports.find(p => p.name === tabState.selectedPort)?.product || ports.find(p => p.name === tabState.selectedPort)?.manufacturer }}
+                  </span>
+                </div>
               </div>
               <svg class="chevron" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <polyline points="6,9 12,15 18,9"/>
@@ -377,7 +376,9 @@ onUnmounted(() => {
               >
                 <div class="port-details">
                   <span class="port-name">{{ port.port_type }}</span>
-                  <span class="port-path">{{ port.name }}</span>
+                  <span class="port-manufacturer" v-if="port.manufacturer || port.product">
+                    {{ port.product || port.manufacturer }}
+                  </span>
                   <span v-if="!isPortAvailable(port.name)" class="port-in-use">(In use)</span>
                 </div>
                 <svg v-if="tabState.selectedPort === port.name" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -660,7 +661,7 @@ onUnmounted(() => {
           </span>
         </div>
         <button class="btn-clear" @click="clearTerminal">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <polyline points="3,6 5,6 21,6"/>
             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
           </svg>
@@ -711,14 +712,14 @@ onUnmounted(() => {
               @click="tabState.inputMessage = ''"
               :title="t.clearContent"
             >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
                 <line x1="18" y1="6" x2="6" y2="18"/>
                 <line x1="6" y1="6" x2="18" y2="18"/>
               </svg>
             </button>
           </div>
           <button class="btn-send" :disabled="!tabState.isConnected || !tabState.inputMessage || tabState.autoSendEnabled" @click="sendMessage">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <line x1="22" y1="2" x2="11" y2="13"/>
               <polygon points="22,2 15,22 11,13 2,9 22,2"/>
             </svg>
@@ -731,7 +732,7 @@ onUnmounted(() => {
             @click="startAutoSend"
             :title="t.auto"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polygon points="5,3 19,12 5,21" fill="currentColor"/>
             </svg>
             {{ t.auto }}
@@ -742,7 +743,7 @@ onUnmounted(() => {
             @click="stopAutoSend"
             :title="t.stop"
           >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
               <rect x="6" y="4" width="4" height="16"/>
               <rect x="14" y="4" width="4" height="16"/>
             </svg>
@@ -944,11 +945,24 @@ onUnmounted(() => {
   font-size: 0.8rem;
 }
 
+.port-dropdown .selected-port-info {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
 .port-dropdown .selected-port {
   font-size: 0.8rem;
   font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono);
+}
+
+.port-dropdown .selected-device {
+  font-size: 0.65rem;
+  color: var(--accent-primary);
+  font-weight: 500;
+  opacity: 0.9;
 }
 
 .port-menu {
@@ -983,10 +997,10 @@ onUnmounted(() => {
   font-family: var(--font-mono);
 }
 
-.port-path {
-  font-size: 0.65rem;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
+.port-manufacturer {
+  font-size: 0.7rem;
+  color: var(--accent-primary);
+  font-weight: 500;
 }
 
 .port-in-use {
@@ -1124,18 +1138,26 @@ onUnmounted(() => {
   color: var(--text-secondary);
 }
 
-.toggle-switch.compact .toggle-slider {
-  width: 32px;
-  height: 18px;
+.toggle-switch.compact {
+  gap: 4px;
 }
 
-.toggle-switch.compact .toggle-slider::before {
-  width: 14px;
+.toggle-switch.compact .toggle-slider {
+  width: 26px;
   height: 14px;
 }
 
+.toggle-switch.compact .toggle-slider::before {
+  width: 10px;
+  height: 10px;
+}
+
 .toggle-switch.compact input:checked + .toggle-slider::before {
-  transform: translateX(14px);
+  transform: translateX(12px);
+}
+
+.toggle-switch.compact .toggle-label {
+  font-size: 0.65rem;
 }
 
 /* Line ending */
@@ -1285,7 +1307,7 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 14px 20px;
+  padding: 6px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
 }
@@ -1293,56 +1315,58 @@ onUnmounted(() => {
 .terminal-title {
   display: flex;
   align-items: center;
-  gap: 10px;
-  font-size: 0.9rem;
+  gap: 6px;
+  font-size: 0.75rem;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .terminal-title svg {
+  width: 12px;
+  height: 12px;
   color: var(--accent-primary);
 }
 
 .terminal-stats {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   margin-left: auto;
-  margin-right: 12px;
+  margin-right: 8px;
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px 8px;
-  border-radius: 4px;
-  font-size: 0.65rem;
+  gap: 2px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.6rem;
   font-weight: 600;
   font-family: var(--font-mono);
 }
 
 .stat-item.tx {
-  background: var(--warning-light);
-  color: var(--warning);
+  background: var(--warning);
+  color: white;
 }
 
 .stat-item.rx {
-  background: var(--success-light);
-  color: var(--success);
+  background: var(--success);
+  color: white;
 }
 
 .stat-arrow {
-  font-size: 0.7rem;
+  font-size: 0.55rem;
   font-weight: 700;
 }
 
 .btn-clear {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 14px;
-  font-size: 0.8rem;
+  gap: 4px;
+  padding: 4px 10px;
+  font-size: 0.7rem;
   font-weight: 600;
   font-family: var(--font-sans);
   background: var(--bg-tertiary);
@@ -1443,7 +1467,7 @@ onUnmounted(() => {
 
 /* Send Container */
 .send-container {
-  padding: 16px 20px;
+  padding: 8px 12px;
   background: var(--bg-secondary);
   border-top: 1px solid var(--border-color);
 }
@@ -1451,7 +1475,7 @@ onUnmounted(() => {
 .send-wrapper {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
 .input-wrapper {
@@ -1461,12 +1485,12 @@ onUnmounted(() => {
 
 .input-wrapper input {
   width: 100%;
-  padding: 14px 40px 14px 18px;
+  padding: 8px 32px 8px 12px;
   background: var(--bg-tertiary);
-  border: 2px solid transparent;
-  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
   color: var(--text-primary);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   font-family: var(--font-mono);
   transition: all 0.2s ease;
 }
@@ -1475,7 +1499,7 @@ onUnmounted(() => {
   outline: none;
   border-color: var(--border-focus);
   background: var(--bg-secondary);
-  box-shadow: 0 0 0 4px var(--accent-light);
+  box-shadow: 0 0 0 2px var(--accent-light);
 }
 
 .input-wrapper input:disabled {
@@ -1489,14 +1513,14 @@ onUnmounted(() => {
 
 .btn-clear-input {
   position: absolute;
-  right: 12px;
+  right: 8px;
   top: 50%;
   transform: translateY(-50%);
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 18px;
+  height: 18px;
   background: var(--bg-hover);
   border: none;
   border-radius: 50%;
@@ -1513,18 +1537,18 @@ onUnmounted(() => {
 .btn-send {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 14px 24px;
-  font-size: 0.9rem;
+  gap: 5px;
+  padding: 8px 14px;
+  font-size: 0.75rem;
   font-weight: 600;
   font-family: var(--font-sans);
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   border: none;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   color: white;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 4px 14px rgb(99 102 241 / 0.35);
+  box-shadow: 0 2px 8px rgb(99 102 241 / 0.3);
 }
 
 .btn-send:hover:not(:disabled) {
@@ -1542,14 +1566,14 @@ onUnmounted(() => {
 .btn-auto-send {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 14px 20px;
-  font-size: 0.85rem;
+  gap: 4px;
+  padding: 8px 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   font-family: var(--font-sans);
   background: var(--success);
   border: none;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   color: white;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -1568,14 +1592,14 @@ onUnmounted(() => {
 .btn-auto-stop {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 14px 20px;
-  font-size: 0.85rem;
+  gap: 4px;
+  padding: 8px 12px;
+  font-size: 0.75rem;
   font-weight: 600;
   font-family: var(--font-sans);
   background: var(--danger);
   border: none;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   color: white;
   cursor: pointer;
   transition: all 0.2s ease;

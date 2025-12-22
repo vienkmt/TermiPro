@@ -61,7 +61,7 @@ function isTabConnected(tabId) {
         }"
         @click="emit('selectTab', tabId)"
       >
-        <svg class="tab-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <svg class="tab-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="4" y="4" width="16" height="16" rx="2"/>
           <rect x="9" y="9" width="6" height="6"/>
           <line x1="9" y1="1" x2="9" y2="4"/>
@@ -80,7 +80,7 @@ function isTabConnected(tabId) {
           @click.stop="emit('closeTab', tabId)"
           :title="t.closeTab"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
             <line x1="18" y1="6" x2="6" y2="18"/>
             <line x1="6" y1="6" x2="18" y2="18"/>
           </svg>
@@ -94,7 +94,7 @@ function isTabConnected(tabId) {
       @click="emit('addTab')"
       :title="canAddTab ? t.newTab : t.maxTabsReached"
     >
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <line x1="12" y1="5" x2="12" y2="19"/>
         <line x1="5" y1="12" x2="19" y2="12"/>
       </svg>
@@ -108,22 +108,22 @@ function isTabConnected(tabId) {
   align-items: center;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  padding: 0 12px;
-  gap: 8px;
-  height: 42px;
+  padding: 0 8px;
+  gap: 6px;
+  height: 30px;
   flex-shrink: 0;
 }
 
 .tabs-container {
   display: flex;
-  gap: 4px;
+  gap: 3px;
   flex: 1;
   overflow-x: auto;
-  padding: 6px 0;
+  padding: 3px 0;
 }
 
 .tabs-container::-webkit-scrollbar {
-  height: 4px;
+  height: 3px;
 }
 
 .tabs-container::-webkit-scrollbar-thumb {
@@ -134,15 +134,15 @@ function isTabConnected(tabId) {
 .tab {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  gap: 5px;
+  padding: 4px 8px;
   background: var(--bg-tertiary);
   border: 1px solid transparent;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 120px;
-  max-width: 180px;
+  min-width: 90px;
+  max-width: 150px;
   position: relative;
 }
 
@@ -155,7 +155,7 @@ function isTabConnected(tabId) {
   border-color: var(--accent-primary);
   border-bottom-color: var(--accent-light);
   margin-bottom: -1px;
-  box-shadow: 0 -2px 8px rgba(14, 165, 233, 0.15);
+  box-shadow: 0 -2px 6px rgba(14, 165, 233, 0.15);
 }
 
 .tab.active .tab-icon {
@@ -171,10 +171,12 @@ function isTabConnected(tabId) {
   flex-shrink: 0;
   color: var(--text-tertiary);
   transition: color 0.2s ease;
+  width: 10px;
+  height: 10px;
 }
 
 .tab-name {
-  font-size: 0.75rem;
+  font-size: 0.65rem;
   font-weight: 600;
   color: var(--text-primary);
   overflow: hidden;
@@ -185,8 +187,8 @@ function isTabConnected(tabId) {
 }
 
 .connection-dot {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
   background: var(--success);
   border-radius: 50%;
   flex-shrink: 0;
@@ -202,11 +204,11 @@ function isTabConnected(tabId) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   background: transparent;
   border: none;
-  border-radius: 3px;
+  border-radius: 2px;
   color: var(--text-tertiary);
   cursor: pointer;
   opacity: 0;
@@ -227,8 +229,8 @@ function isTabConnected(tabId) {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 22px;
+  height: 22px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
