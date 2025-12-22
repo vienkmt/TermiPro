@@ -8,9 +8,12 @@ import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import TabBar from "./components/TabBar.vue";
 import SerialTab from "./components/SerialTab.vue";
+import TcpClientTab from "./components/TcpClientTab.vue";
+import TcpServerTab from "./components/TcpServerTab.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import UpdateModal from "./components/UpdateModal.vue";
-import { useTabStore } from "./stores/tabStore";
+import NewTabModal from "./components/NewTabModal.vue";
+import { useTabStore, CONNECTION_TYPES } from "./stores/tabStore";
 
 // i18n Translations
 const translations = {
@@ -91,6 +94,30 @@ const translations = {
     checking: "Đang kiểm tra...",
     noUpdateAvailable: "Bạn đang dùng phiên bản mới nhất",
     updateError: "Lỗi kiểm tra cập nhật",
+    // TCP
+    tcpClient: "TCP Client",
+    tcpServer: "TCP Server",
+    host: "Host",
+    port: "Port",
+    listenPort: "Cổng lắng nghe",
+    bindAddress: "Địa chỉ bind",
+    maxClients: "Tối đa client",
+    startServer: "Khởi động",
+    stopServer: "Dừng Server",
+    connectedClients: "Client đã kết nối",
+    noClients: "Chưa có client kết nối",
+    sendTo: "Gửi đến",
+    sendToAll: "Tất cả client",
+    selectConnectionType: "Chọn loại kết nối",
+    connectionTypeSerial: "Serial Port",
+    connectionTypeTcpClient: "TCP Client",
+    connectionTypeTcpServer: "TCP Server",
+    serialDesc: "Kết nối với thiết bị qua cổng serial",
+    tcpClientDesc: "Kết nối đến server TCP từ xa",
+    tcpServerDesc: "Lắng nghe kết nối TCP đến",
+    startServerToBegin: "Khởi động server để bắt đầu",
+    pleaseStartFirst: "Vui lòng khởi động server trước!",
+    reconnecting: "Đang kết nối lại...",
   },
   en: {
     // Status
@@ -169,6 +196,30 @@ const translations = {
     checking: "Checking...",
     noUpdateAvailable: "You're using the latest version",
     updateError: "Update check failed",
+    // TCP
+    tcpClient: "TCP Client",
+    tcpServer: "TCP Server",
+    host: "Host",
+    port: "Port",
+    listenPort: "Listen Port",
+    bindAddress: "Bind Address",
+    maxClients: "Max Clients",
+    startServer: "Start",
+    stopServer: "Stop Server",
+    connectedClients: "Connected Clients",
+    noClients: "No clients connected",
+    sendTo: "Send to",
+    sendToAll: "All clients",
+    selectConnectionType: "Select Connection Type",
+    connectionTypeSerial: "Serial Port",
+    connectionTypeTcpClient: "TCP Client",
+    connectionTypeTcpServer: "TCP Server",
+    serialDesc: "Connect to device via serial port",
+    tcpClientDesc: "Connect to remote TCP server",
+    tcpServerDesc: "Listen for incoming TCP connections",
+    startServerToBegin: "Start server to begin",
+    pleaseStartFirst: "Please start server first!",
+    reconnecting: "Reconnecting...",
   }
 };
 
@@ -187,7 +238,10 @@ provide('toggleLanguage', toggleLanguage);
 
 // Tab store
 const tabStore = useTabStore();
-const { tabs, activeTabId, tabOrder, activeTab, canAddTab, createTab, closeTab, setActiveTab, getTabByPortName, getConnectedPorts } = tabStore;
+const { tabs, activeTabId, tabOrder, activeTab, canAddTab, createTab, closeTab, setActiveTab, getTabByPortName, getTabByConnectionId, getConnectedPorts } = tabStore;
+
+// New tab modal state
+const showNewTabModal = ref(false);
 
 // Constants
 const MAX_TERMINAL_ENTRIES = 500;
@@ -213,6 +267,12 @@ let updateCheckInterval = null;
 // Serial event listeners
 let unlistenSerial = null;
 let unlistenDisconnect = null;
+
+// TCP event listeners
+let unlistenTcpData = null;
+let unlistenTcpClientStatus = null;
+let unlistenTcpServerStatus = null;
+let unlistenTcpServerClientEvent = null;
 
 // Batching for terminal updates (performance optimization)
 const pendingRxData = new Map(); // port_name -> [{data, timestamp}]
@@ -320,20 +380,26 @@ async function requestCloseTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
-  // Auto disconnect if connected
+  // Auto disconnect if connected based on connection type
   if (tab.isConnected) {
     try {
-      await invoke("close_port", { portName: tab.selectedPort });
+      if (tab.connectionType === CONNECTION_TYPES.SERIAL) {
+        await invoke("close_port", { portName: tab.selectedPort });
+      } else if (tab.connectionType === CONNECTION_TYPES.TCP_CLIENT) {
+        await invoke("tcp_client_disconnect", { connectionId: tab.connectionId });
+      } else if (tab.connectionType === CONNECTION_TYPES.TCP_SERVER) {
+        await invoke("tcp_server_stop", { serverId: tab.serverId });
+      }
       tab.isConnected = false;
     } catch (error) {
-      console.error("Error closing port:", error);
+      console.error("Error closing connection:", error);
     }
   }
 
   closeTab(tabId);
   // Create new tab if all tabs are closed
   if (tabs.size === 0) {
-    createTab();
+    showNewTabModal.value = true;
   }
 }
 
@@ -365,7 +431,16 @@ function cancelCloseTab() {
 }
 
 function handleAddTab() {
-  createTab();
+  showNewTabModal.value = true;
+}
+
+function handleNewTabSelect(connectionType) {
+  createTab(connectionType);
+  showNewTabModal.value = false;
+}
+
+function cancelNewTabModal() {
+  showNewTabModal.value = false;
 }
 
 // Handle device disconnection (unplugged)
@@ -387,6 +462,102 @@ function handleDeviceDisconnected(portName, reason) {
     // Show notification
     console.warn(`Device disconnected: ${portName} - ${reason}`);
     alert(`${t.value.deviceDisconnected}: ${portName}`);
+  }
+}
+
+// ===================== TCP HANDLERS =====================
+
+// TCP Client connect
+async function handleTcpClientConnect(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  try {
+    const config = {
+      host: tab.host,
+      port: tab.port,
+      connection_id: tab.connectionId,
+    };
+
+    await invoke("tcp_client_connect", { config });
+    // Status will be updated via event listener
+  } catch (error) {
+    console.error("TCP Client connection error:", error);
+    alert("Error: " + error);
+  }
+}
+
+// TCP Client disconnect
+async function handleTcpClientDisconnect(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  try {
+    await invoke("tcp_client_disconnect", { connectionId: tab.connectionId });
+    tab.isConnected = false;
+
+    // Stop auto send if running
+    if (tab.autoSendEnabled) {
+      tab.autoSendEnabled = false;
+      if (tab.autoSendTimer) {
+        clearInterval(tab.autoSendTimer);
+        tab.autoSendTimer = null;
+      }
+    }
+  } catch (error) {
+    console.error("TCP Client disconnect error:", error);
+    alert("Error: " + error);
+  }
+}
+
+// TCP Server start
+async function handleTcpServerStart(tabId) {
+  console.log("[TCP Server] handleTcpServerStart called with tabId:", tabId);
+  const tab = tabs.get(tabId);
+  if (!tab) {
+    console.error("[TCP Server] Tab not found:", tabId);
+    return;
+  }
+
+  try {
+    const config = {
+      port: tab.listenPort,
+      bind_address: tab.bindAddress,
+      server_id: tab.serverId,
+      max_clients: tab.maxClients,
+    };
+    console.log("[TCP Server] Starting with config:", config);
+
+    const result = await invoke("tcp_server_start", { config });
+    console.log("[TCP Server] invoke result:", result);
+    // Status will be updated via event listener
+  } catch (error) {
+    console.error("[TCP Server] Start error:", error);
+    alert("Error: " + error);
+  }
+}
+
+// TCP Server stop
+async function handleTcpServerStop(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  try {
+    await invoke("tcp_server_stop", { serverId: tab.serverId });
+    tab.isConnected = false;
+    tab.connectedClients = [];
+
+    // Stop auto send if running
+    if (tab.autoSendEnabled) {
+      tab.autoSendEnabled = false;
+      if (tab.autoSendTimer) {
+        clearInterval(tab.autoSendTimer);
+        tab.autoSendTimer = null;
+      }
+    }
+  } catch (error) {
+    console.error("TCP Server stop error:", error);
+    alert("Error: " + error);
   }
 }
 
@@ -493,12 +664,44 @@ function cancelUpdate() {
 }
 
 // Lifecycle
+// Keyboard shortcut handler
+let isClosingTab = false;
+function handleKeyboardShortcuts(event) {
+  const isMac = navigator.userAgent.toUpperCase().indexOf('MAC') >= 0;
+  const modifier = isMac ? event.metaKey : event.ctrlKey;
+
+  if (modifier && event.key.toLowerCase() === 't') {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    if (canAddTab.value && !showNewTabModal.value) {
+      showNewTabModal.value = true;
+    }
+    return false;
+  } else if (modifier && event.key.toLowerCase() === 'w') {
+    event.preventDefault();
+    event.stopPropagation();
+    event.stopImmediatePropagation();
+    // Prevent multiple close calls
+    if (activeTabId.value && !isClosingTab && !showConfirmDialog.value) {
+      isClosingTab = true;
+      console.log('[Shortcut] Closing tab:', activeTabId.value);
+      requestCloseTab(activeTabId.value);
+      setTimeout(() => { isClosingTab = false; }, 300);
+    }
+    return false;
+  }
+}
+
 onMounted(async () => {
+  // Add keyboard shortcuts (capture phase to intercept before other handlers)
+  document.addEventListener('keydown', handleKeyboardShortcuts, true);
+
   // Set window title with version
   try {
     const version = await getVersion();
     currentVersion.value = version;
-    await getCurrentWindow().setTitle(`TermiPro by vienkmt - v${version}`);
+    await getCurrentWindow().setTitle(`TermiPro v${version} - by vienkmt`);
   } catch (e) {
     console.warn('Could not set window title:', e);
   }
@@ -543,10 +746,150 @@ onMounted(async () => {
     const { port_name, reason } = event.payload;
     handleDeviceDisconnected(port_name, reason);
   });
+
+  // ===================== TCP EVENT LISTENERS =====================
+
+  // TCP data listener - routes data to correct tab
+  unlistenTcpData = await listen("tcp-data", (event) => {
+    const { connection_id, client_id, data, timestamp } = event.payload;
+    const tab = getTabByConnectionId(connection_id);
+    if (tab) {
+      // Limit terminal entries
+      if (tab.terminalData.length >= MAX_TERMINAL_ENTRIES) {
+        const removed = tab.terminalData.shift();
+        if (removed.type === 'tx') tab.txCount--;
+        else tab.rxCount--;
+      }
+
+      tab.terminalData.push({
+        type: "rx",
+        data: data,
+        timestamp: new Date(timestamp).toLocaleTimeString(),
+        clientId: client_id || null,
+      });
+      tab.rxCount++;
+      tab.totalRxCount++;
+    }
+  });
+
+  // TCP Client status listener
+  unlistenTcpClientStatus = await listen("tcp-client-status", (event) => {
+    const { connection_id, status, message } = event.payload;
+    const tab = getTabByConnectionId(connection_id);
+    if (tab && tab.connectionType === CONNECTION_TYPES.TCP_CLIENT) {
+      // Update connection status
+      tab.connectionStatus = status;
+      tab.statusMessage = message || null;
+
+      if (status === "connected") {
+        tab.isConnected = true;
+        tab.isReconnecting = false;
+      } else if (status === "reconnecting" || status === "retrying") {
+        // Đang thử kết nối lại hoặc retry gửi data
+        tab.isReconnecting = true;
+        // Vẫn giữ isConnected = true trong lúc reconnecting để không break UI
+        console.warn(`TCP Client ${status}:`, message);
+      } else if (status === "write_failed") {
+        // Gửi thất bại nhưng chưa disconnect hẳn
+        tab.isReconnecting = true;
+        console.error("TCP Client write failed:", message);
+      } else if (status === "disconnected" || status === "error") {
+        tab.isConnected = false;
+        tab.isReconnecting = false;
+        // Stop auto send if running
+        if (tab.autoSendEnabled) {
+          tab.autoSendEnabled = false;
+          if (tab.autoSendTimer) {
+            clearInterval(tab.autoSendTimer);
+            tab.autoSendTimer = null;
+          }
+        }
+        if (message) {
+          console.error(`TCP Client ${status}:`, message);
+        }
+      }
+    }
+  });
+
+  // TCP Server status listener
+  unlistenTcpServerStatus = await listen("tcp-server-status", (event) => {
+    console.log("[TCP Server] Status event received:", event.payload);
+    const { connection_id, status, message } = event.payload;
+    const tab = getTabByConnectionId(connection_id);
+    console.log("[TCP Server] Found tab for connection_id:", connection_id, "tab:", tab?.id);
+    if (tab && tab.connectionType === CONNECTION_TYPES.TCP_SERVER) {
+      if (status === "started") {
+        console.log("[TCP Server] Setting isConnected = true for tab:", tab.id);
+        tab.isConnected = true;
+        tab.statusMessage = message || null;
+        // Sync echo state to Rust backend
+        if (tab.echoEnabled) {
+          invoke("tcp_server_set_echo", {
+            serverId: tab.serverId,
+            enabled: tab.echoEnabled,
+          }).catch(err => console.error("Error syncing echo state:", err));
+        }
+      } else if (status === "stopped") {
+        tab.isConnected = false;
+        tab.connectedClients = [];
+        tab.statusMessage = null;
+        // Stop auto send if running
+        if (tab.autoSendEnabled) {
+          tab.autoSendEnabled = false;
+          if (tab.autoSendTimer) {
+            clearInterval(tab.autoSendTimer);
+            tab.autoSendTimer = null;
+          }
+        }
+      } else if (status === "error") {
+        tab.isConnected = false;
+        tab.connectedClients = [];
+        // Set error message to show in UI
+        tab.statusMessage = message || "Lỗi không xác định";
+        // Stop auto send if running
+        if (tab.autoSendEnabled) {
+          tab.autoSendEnabled = false;
+          if (tab.autoSendTimer) {
+            clearInterval(tab.autoSendTimer);
+            tab.autoSendTimer = null;
+          }
+        }
+        if (message) {
+          console.error("[TCP Server] Error:", message);
+        }
+      }
+    } else {
+      console.warn("[TCP Server] Tab not found or wrong type for connection_id:", connection_id);
+    }
+  });
+
+  // TCP Server client events listener
+  unlistenTcpServerClientEvent = await listen("tcp-server-client-event", (event) => {
+    const { server_id, client_id, remote_addr, event_type } = event.payload;
+    const tab = getTabByConnectionId(server_id);
+    if (tab && tab.connectionType === CONNECTION_TYPES.TCP_SERVER) {
+      if (event_type === "connected") {
+        tab.connectedClients.push({
+          clientId: client_id,
+          remoteAddr: remote_addr,
+          connectedAt: Date.now(),
+        });
+      } else if (event_type === "disconnected") {
+        tab.connectedClients = tab.connectedClients.filter(c => c.clientId !== client_id);
+        // Reset selectedClientId if the selected client disconnected
+        if (tab.selectedClientId === client_id) {
+          tab.selectedClientId = null;
+        }
+      }
+    }
+  });
 });
 
 onUnmounted(async () => {
-  // Cleanup event listeners
+  // Cleanup keyboard shortcuts
+  document.removeEventListener('keydown', handleKeyboardShortcuts, true);
+
+  // Cleanup serial event listeners
   if (unlistenSerial) {
     unlistenSerial();
   }
@@ -554,18 +897,38 @@ onUnmounted(async () => {
     unlistenDisconnect();
   }
 
+  // Cleanup TCP event listeners
+  if (unlistenTcpData) {
+    unlistenTcpData();
+  }
+  if (unlistenTcpClientStatus) {
+    unlistenTcpClientStatus();
+  }
+  if (unlistenTcpServerStatus) {
+    unlistenTcpServerStatus();
+  }
+  if (unlistenTcpServerClientEvent) {
+    unlistenTcpServerClientEvent();
+  }
+
   // Clear update check interval
   if (updateCheckInterval) {
     clearInterval(updateCheckInterval);
   }
 
-  // Close all connected ports
+  // Close all connections based on connection type
   for (const [, tab] of tabs) {
     if (tab.isConnected) {
       try {
-        await invoke("close_port", { portName: tab.selectedPort });
+        if (tab.connectionType === CONNECTION_TYPES.SERIAL) {
+          await invoke("close_port", { portName: tab.selectedPort });
+        } else if (tab.connectionType === CONNECTION_TYPES.TCP_CLIENT) {
+          await invoke("tcp_client_disconnect", { connectionId: tab.connectionId });
+        } else if (tab.connectionType === CONNECTION_TYPES.TCP_SERVER) {
+          await invoke("tcp_server_stop", { serverId: tab.serverId });
+        }
       } catch (error) {
-        console.error("Error closing port:", error);
+        console.error("Error closing connection:", error);
       }
     }
     // Clear auto send timers
@@ -639,21 +1002,42 @@ onUnmounted(async () => {
       @add-tab="handleAddTab"
     />
 
-    <!-- Main Content - Tabs -->
+    <!-- Main Content - Tabs (render all tabs, show only active) -->
     <div class="main-content">
-      <KeepAlive :max="8">
+      <template v-for="[tabId, tab] in tabs" :key="tabId">
+        <!-- Serial Tab -->
         <SerialTab
-          v-if="activeTab"
-          :key="activeTabId"
-          :tab-id="activeTabId"
-          :tab-state="activeTab"
+          v-if="tab.connectionType === 'serial'"
+          v-show="tabId === activeTabId"
+          :tab-id="tabId"
+          :tab-state="tab"
           :ports="ports"
           :connected-ports="connectedPorts"
           @connect="handleConnect"
           @disconnect="handleDisconnect"
           @refresh-ports="refreshPorts"
         />
-      </KeepAlive>
+
+        <!-- TCP Client Tab -->
+        <TcpClientTab
+          v-else-if="tab.connectionType === 'tcp_client'"
+          v-show="tabId === activeTabId"
+          :tab-id="tabId"
+          :tab-state="tab"
+          @connect="handleTcpClientConnect"
+          @disconnect="handleTcpClientDisconnect"
+        />
+
+        <!-- TCP Server Tab -->
+        <TcpServerTab
+          v-else-if="tab.connectionType === 'tcp_server'"
+          v-show="tabId === activeTabId"
+          :tab-id="tabId"
+          :tab-state="tab"
+          @start="handleTcpServerStart"
+          @stop="handleTcpServerStop"
+        />
+      </template>
     </div>
 
     <!-- Confirm Dialog -->
@@ -673,6 +1057,13 @@ onUnmounted(async () => {
       :error-message="updateError"
       @confirm="performUpdate"
       @cancel="cancelUpdate"
+    />
+
+    <!-- New Tab Modal -->
+    <NewTabModal
+      :visible="showNewTabModal"
+      @select="handleNewTabSelect"
+      @cancel="cancelNewTabModal"
     />
   </div>
 </template>

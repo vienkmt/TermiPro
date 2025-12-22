@@ -24,18 +24,41 @@ const emit = defineEmits(['selectTab', 'closeTab', 'addTab']);
 
 const t = inject('t');
 
+// Get connection type for tab
+function getConnectionType(tabId) {
+  const tab = props.tabs.get(tabId);
+  return tab?.connectionType || 'serial';
+}
+
 // Get display name for tab
 function getTabDisplayName(tabId) {
   const tab = props.tabs.get(tabId);
   if (!tab) return t.value.newTab;
 
-  if (tab.selectedPort && tab.isConnected) {
-    // Show short port name
-    const shortName = tab.selectedPort.split('/').pop();
-    return shortName;
-  } else if (tab.selectedPort) {
-    // Port selected but not connected
-    return tab.selectedPort.split('/').pop();
+  // Serial tab
+  if (tab.connectionType === 'serial') {
+    if (tab.selectedPort && tab.isConnected) {
+      return tab.selectedPort.split('/').pop();
+    } else if (tab.selectedPort) {
+      return tab.selectedPort.split('/').pop();
+    }
+    return t.value.newTab;
+  }
+
+  // TCP Client tab
+  if (tab.connectionType === 'tcp_client') {
+    if (tab.isConnected) {
+      return `${tab.host}:${tab.port}`;
+    }
+    return t.value.tcpClient;
+  }
+
+  // TCP Server tab
+  if (tab.connectionType === 'tcp_server') {
+    if (tab.isConnected) {
+      return `:${tab.listenPort}`;
+    }
+    return t.value.tcpServer;
   }
 
   return t.value.newTab;
@@ -57,11 +80,15 @@ function isTabConnected(tabId) {
         class="tab"
         :class="{
           active: tabId === activeTabId,
-          connected: isTabConnected(tabId)
+          connected: isTabConnected(tabId),
+          'type-serial': getConnectionType(tabId) === 'serial',
+          'type-tcp-client': getConnectionType(tabId) === 'tcp_client',
+          'type-tcp-server': getConnectionType(tabId) === 'tcp_server'
         }"
         @click="emit('selectTab', tabId)"
       >
-        <svg class="tab-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <!-- Serial Icon -->
+        <svg v-if="getConnectionType(tabId) === 'serial'" class="tab-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <rect x="4" y="4" width="16" height="16" rx="2"/>
           <rect x="9" y="9" width="6" height="6"/>
           <line x1="9" y1="1" x2="9" y2="4"/>
@@ -72,6 +99,20 @@ function isTabConnected(tabId) {
           <line x1="20" y1="15" x2="23" y2="15"/>
           <line x1="1" y1="9" x2="4" y2="9"/>
           <line x1="1" y1="15" x2="4" y2="15"/>
+        </svg>
+        <!-- TCP Client Icon -->
+        <svg v-else-if="getConnectionType(tabId) === 'tcp_client'" class="tab-icon tcp-client-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M5 12h14"/>
+          <path d="M13 5l7 7-7 7"/>
+          <rect x="2" y="8" width="6" height="8" rx="1"/>
+        </svg>
+        <!-- TCP Server Icon -->
+        <svg v-else-if="getConnectionType(tabId) === 'tcp_server'" class="tab-icon tcp-server-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="3" width="20" height="6" rx="1"/>
+          <rect x="2" y="15" width="20" height="6" rx="1"/>
+          <circle cx="6" cy="6" r="1" fill="currentColor"/>
+          <circle cx="6" cy="18" r="1" fill="currentColor"/>
+          <path d="M12 9v6"/>
         </svg>
         <span class="tab-name">{{ getTabDisplayName(tabId) }}</span>
         <span v-if="isTabConnected(tabId)" class="connection-dot"></span>
@@ -173,6 +214,19 @@ function isTabConnected(tabId) {
   transition: color 0.2s ease;
   width: 10px;
   height: 10px;
+}
+
+/* Connection type icon colors */
+.tab.type-tcp-client.active .tab-icon {
+  color: #0ea5e9;
+}
+
+.tab.type-tcp-server.active .tab-icon {
+  color: #8b5cf6;
+}
+
+.tab.type-serial.active .tab-icon {
+  color: #10b981;
 }
 
 .tab-name {
