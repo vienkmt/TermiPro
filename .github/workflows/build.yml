@@ -15,25 +15,37 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+        shell: pwsh
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
       - name: Install dependencies
         run: npm install
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          args: --target x86_64-pc-windows-msvc --bundles msi
-      - name: Upload Windows MSI
+          args: --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Upload Windows Setup
         uses: actions/upload-artifact@v4
         with:
-          name: TermiPro-Windows
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
+          name: TermiPro-v${{ steps.version.outputs.VERSION }}-Windows-Setup
+          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
           if-no-files-found: error
 
   build-macos:
@@ -41,25 +53,36 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(cat src-tauri/tauri.conf.json | python3 -c "import sys, json; print(json.load(sys.stdin)['version'])")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin
+
       - name: Install dependencies
         run: npm install
+
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: --target aarch64-apple-darwin
+
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
-          name: TermiPro-macOS
+          name: TermiPro-v${{ steps.version.outputs.VERSION }}-macOS-DMG
           path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
           if-no-files-found: error
