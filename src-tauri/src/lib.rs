@@ -13,6 +13,8 @@ use tauri::{AppHandle, Emitter, Manager, State};
 pub struct PortInfo {
     pub name: String,
     pub port_type: String,
+    pub manufacturer: Option<String>,
+    pub product: Option<String>,
 }
 
 // Cấu hình serial port
@@ -110,9 +112,19 @@ fn list_serial_ports() -> Result<Vec<PortInfo>, String> {
                     .to_string()
             };
 
+            // Lấy thông tin USB nếu có
+            let (manufacturer, product) = match &p.port_type {
+                serialport::SerialPortType::UsbPort(usb_info) => {
+                    (usb_info.manufacturer.clone(), usb_info.product.clone())
+                }
+                _ => (None, None),
+            };
+
             PortInfo {
                 name: p.port_name,
                 port_type: short_name,
+                manufacturer,
+                product,
             }
         })
         .collect();
