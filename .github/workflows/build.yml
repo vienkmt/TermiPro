@@ -1,7 +1,10 @@
-name: Build TermiPro
+name: Build and Release TermiPro
+
 on:
   push:
     branches: [main]
+    tags:
+      - 'v*'
     paths-ignore:
       - '**.md'
       - '**.txt'
@@ -9,9 +12,15 @@ on:
       - '.gitignore'
   workflow_dispatch:
 
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
 jobs:
   build-windows:
     runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -45,44 +54,121 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TermiPro-v${{ steps.version.outputs.VERSION }}-Windows-Setup
-          path: src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.sig
           if-no-files-found: error
 
-  build-macos:
-    runs-on: macos-latest
+  # TODO: Uncomment khi cần build macOS
+  # build-macos:
+  #   runs-on: macos-latest
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+
+  #     - name: Get version
+  #       id: version
+  #       run: |
+  #         VERSION=$(cat src-tauri/tauri.conf.json | python3 -c "import sys, json; print(json.load(sys.stdin)['version'])")
+  #         echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: 20
+
+  #     - name: Setup Rust
+  #       uses: dtolnay/rust-toolchain@stable
+  #       with:
+  #         targets: aarch64-apple-darwin
+
+  #     - name: Install dependencies
+  #       run: npm install
+
+  #     - name: Build Tauri app
+  #       uses: tauri-apps/tauri-action@v0
+  #       env:
+  #         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  #       with:
+  #         args: --target aarch64-apple-darwin
+
+  #     - name: Upload macOS DMG
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: TermiPro-v${{ steps.version.outputs.VERSION }}-macOS-DMG
+  #         path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+  #         if-no-files-found: error
+
+  # Create GitHub Release when tag is pushed
+  release:
+    needs: [build-windows]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get version
-        id: version
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: TermiPro-v${{ needs.build-windows.outputs.version }}-Windows-Setup
+          path: artifacts/windows
+
+      # TODO: Uncomment khi cần build macOS
+      # - name: Download macOS artifacts
+      #   uses: actions/download-artifact@v4
+      #   with:
+      #     name: TermiPro-v${{ needs.build-windows.outputs.version }}-macOS-DMG
+      #     path: artifacts/macos
+
+      - name: Create latest.json for updater
         run: |
-          VERSION=$(cat src-tauri/tauri.conf.json | python3 -c "import sys, json; print(json.load(sys.stdin)['version'])")
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          VERSION="${{ needs.build-windows.outputs.version }}"
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+          # Find the exe and sig files
+          SETUP_FILE=$(ls artifacts/windows/*.exe 2>/dev/null | head -1)
+          SIG_FILE=$(ls artifacts/windows/*.sig 2>/dev/null | head -1)
+
+          if [ -z "$SETUP_FILE" ] || [ -z "$SIG_FILE" ]; then
+            echo "Error: Could not find setup or signature files"
+            exit 1
+          fi
+
+          SETUP_FILENAME=$(basename "$SETUP_FILE")
+
+          # Read signature
+          SIGNATURE=$(cat "$SIG_FILE")
+
+          # Create latest.json
+          cat > artifacts/latest.json << EOF
+          {
+            "version": "$VERSION",
+            "notes": "See the release notes at https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "windows-x86_64": {
+                "signature": "$SIGNATURE",
+                "url": "https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$SETUP_FILENAME"
+              }
+            }
+          }
+          EOF
+
+          echo "Created latest.json:"
+          cat artifacts/latest.json
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
         with:
-          node-version: 20
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
-
-      - name: Install dependencies
-        run: npm install
-
-      - name: Build Tauri app
-        uses: tauri-apps/tauri-action@v0
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/windows/*.exe
+            artifacts/windows/*.sig
+            artifacts/latest.json
+            # artifacts/macos/*.dmg  # TODO: Uncomment khi cần build macOS
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: --target aarch64-apple-darwin
-
-      - name: Upload macOS DMG
-        uses: actions/upload-artifact@v4
-        with:
-          name: TermiPro-v${{ steps.version.outputs.VERSION }}-macOS-DMG
-          path: src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
-          if-no-files-found: error

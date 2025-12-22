@@ -442,6 +442,8 @@ fn is_port_open(state: State<SerialState>, port_name: String) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(SerialState::default())
         .invoke_handler(tauri::generate_handler![
             list_serial_ports,
