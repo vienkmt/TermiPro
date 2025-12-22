@@ -3,6 +3,13 @@ import { ref, reactive, computed } from 'vue';
 const MAX_TABS = 8;
 let tabIdCounter = 0;
 
+// Connection types
+export const CONNECTION_TYPES = {
+  SERIAL: 'serial',
+  TCP_CLIENT: 'tcp_client',
+  TCP_SERVER: 'tcp_server',
+};
+
 // Singleton store instance
 let storeInstance = null;
 
@@ -20,29 +27,20 @@ export function useTabStore() {
   const tabCount = computed(() => tabs.size);
   const canAddTab = computed(() => tabs.size < MAX_TABS);
 
-  // Create default tab state
-  function createTabState(id) {
-    return reactive({
+  // Base tab state (shared across all connection types)
+  function createBaseTabState(id, connectionType) {
+    return {
       id,
-      // Connection state
-      selectedPort: '',
+      connectionType,
       isConnected: false,
 
       // Terminal data
       terminalData: [],
       txCount: 0,
       rxCount: 0,
-      totalTxCount: 0, // Tổng số TX đã gửi (không reset khi xóa entries)
-      totalRxCount: 0, // Tổng số RX đã nhận (không reset khi xóa entries)
+      totalTxCount: 0,
+      totalRxCount: 0,
       inputMessage: '',
-
-      // Serial configuration
-      baudRate: 115200,
-      dataBits: 8,
-      stopBits: '1',
-      parity: 'none',
-      dtr: false,
-      rts: false,
 
       // Auto-send state
       autoSendEnabled: false,
@@ -50,25 +48,80 @@ export function useTabStore() {
       autoSendCount: 0,
       autoSendCurrentMessage: '',
       autoSendTimer: null,
-      autoSendInProgress: false, // Backpressure flag
-
-      // Performance settings
-      byteDelay: 0, // Inter-byte delay in microseconds (0 = disabled)
+      autoSendInProgress: false,
 
       // Display settings
       displayMode: 'text',
       sendAsHex: false,
       autoScroll: true,
       lineEnding: 'CR',
+    };
+  }
+
+  // Serial tab state
+  function createSerialTabState(id) {
+    return reactive({
+      ...createBaseTabState(id, CONNECTION_TYPES.SERIAL),
+      // Serial-specific
+      selectedPort: '',
+      baudRate: 115200,
+      dataBits: 8,
+      stopBits: '1',
+      parity: 'none',
+      dtr: false,
+      rts: false,
+      byteDelay: 0,
     });
   }
 
-  // Create a new tab
-  function createTab() {
+  // TCP Client tab state
+  function createTcpClientTabState(id) {
+    return reactive({
+      ...createBaseTabState(id, CONNECTION_TYPES.TCP_CLIENT),
+      // TCP Client-specific
+      host: 'localhost',
+      port: 8080,
+      connectionId: id,
+      // Connection status tracking
+      connectionStatus: 'idle', // idle, connected, reconnecting, retrying, write_failed, disconnected, error
+      statusMessage: null,
+      isReconnecting: false,
+    });
+  }
+
+  // TCP Server tab state
+  function createTcpServerTabState(id) {
+    return reactive({
+      ...createBaseTabState(id, CONNECTION_TYPES.TCP_SERVER),
+      // TCP Server-specific
+      listenPort: 5000,
+      bindAddress: '0.0.0.0',
+      serverId: id,
+      maxClients: 20,
+      connectedClients: [],
+      selectedClientId: null, // null = send to all
+      statusMessage: null,
+      echoEnabled: false, // Echo received data back to client
+    });
+  }
+
+  // Create a new tab with specified connection type
+  function createTab(connectionType = CONNECTION_TYPES.SERIAL) {
     if (!canAddTab.value) return null;
 
     const id = `tab-${++tabIdCounter}`;
-    const tabState = createTabState(id);
+    let tabState;
+
+    switch (connectionType) {
+      case CONNECTION_TYPES.TCP_CLIENT:
+        tabState = createTcpClientTabState(id);
+        break;
+      case CONNECTION_TYPES.TCP_SERVER:
+        tabState = createTcpServerTabState(id);
+        break;
+      default:
+        tabState = createSerialTabState(id);
+    }
 
     tabs.set(id, tabState);
     tabOrder.value.push(id);
@@ -118,10 +171,26 @@ export function useTabStore() {
     }
   }
 
-  // Get tab by port name (for event routing)
+  // Get tab by port name (for serial event routing)
   function getTabByPortName(portName) {
     for (const [, tab] of tabs) {
-      if (tab.selectedPort === portName && tab.isConnected) {
+      if (tab.connectionType === CONNECTION_TYPES.SERIAL &&
+          tab.selectedPort === portName && tab.isConnected) {
+        return tab;
+      }
+    }
+    return null;
+  }
+
+  // Get tab by connection ID (for TCP event routing)
+  function getTabByConnectionId(connectionId) {
+    for (const [, tab] of tabs) {
+      if (tab.connectionType === CONNECTION_TYPES.TCP_CLIENT &&
+          tab.connectionId === connectionId) {
+        return tab;
+      }
+      if (tab.connectionType === CONNECTION_TYPES.TCP_SERVER &&
+          tab.serverId === connectionId) {
         return tab;
       }
     }
@@ -131,18 +200,20 @@ export function useTabStore() {
   // Check if port is already connected in any tab
   function isPortConnected(portName) {
     for (const [, tab] of tabs) {
-      if (tab.selectedPort === portName && tab.isConnected) {
+      if (tab.connectionType === CONNECTION_TYPES.SERIAL &&
+          tab.selectedPort === portName && tab.isConnected) {
         return true;
       }
     }
     return false;
   }
 
-  // Get all connected ports
+  // Get all connected ports (serial only)
   function getConnectedPorts() {
     const connected = [];
     for (const [, tab] of tabs) {
-      if (tab.isConnected && tab.selectedPort) {
+      if (tab.connectionType === CONNECTION_TYPES.SERIAL &&
+          tab.isConnected && tab.selectedPort) {
         connected.push(tab.selectedPort);
       }
     }
@@ -165,11 +236,13 @@ export function useTabStore() {
     closeTab,
     setActiveTab,
     getTabByPortName,
+    getTabByConnectionId,
     isPortConnected,
     getConnectedPorts,
 
     // Constants
     MAX_TABS,
+    CONNECTION_TYPES,
   };
 
   return storeInstance;
