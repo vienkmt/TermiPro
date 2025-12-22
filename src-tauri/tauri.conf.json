@@ -25,7 +25,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEFFNEVERjRBOTM0NkYzOTQKUldTVTgwYVRTdDlPcnVUek1wanl5Mi8zYUxRS0NnQmZYbGNTcm8xUXFuMThLTGlRU2ExNis5blEK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc4NjFBODMwNjNBRTAxNkMKUldSc0FhNWpNS2hoZUVXNEwzcFc2REdTZG90Uzd4ZUJ1R21aVWd1YlBQYitrMTZacXIzc0Y5QTEK",
       "endpoints": [
         "https://github.com/vienkmt/TermiPro/releases/latest/download/latest.json"
       ],
