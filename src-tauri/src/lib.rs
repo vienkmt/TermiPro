@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::sync::Arc;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 // Struct để lưu thông tin cổng serial
@@ -88,7 +88,7 @@ fn list_serial_ports() -> Result<Vec<PortInfo>, String> {
             // macOS: /dev/tty.* (loại trừ usbmodem)
             #[cfg(target_os = "macos")]
             {
-                name.starts_with("/dev/tty.") && !name.contains("usbmodem")
+                name.starts_with("/dev/tty.")
             }
 
             // Fallback cho các OS khác
@@ -162,13 +162,13 @@ fn open_port(
         _ => return Err("Parity không hợp lệ".to_string()),
     };
 
-    // Mở serial port
+    // Mở serial port với timeout ngắn để poll nhanh
     let port = serialport::new(&port_name, config.baud_rate)
         .data_bits(data_bits)
         .stop_bits(stop_bits)
         .parity(parity)
         .flow_control(FlowControl::None)
-        .timeout(Duration::from_millis(100))
+        .timeout(Duration::from_millis(5)) // Timeout ngắn để responsive
         .open()
         .map_err(|e| format!("Không thể mở port {}: {}", port_name, e))?;
 
@@ -190,10 +190,24 @@ fn open_port(
     let port_name_clone = port_name.clone();
     let app_clone = app.clone();
     let state_ptr = app.state::<SerialState>().inner() as *const SerialState as usize;
+    let baud = config.baud_rate;
 
     thread::spawn(move || {
-        let mut buffer = [0u8; 1024];
+        let mut buffer = [0u8; 4096]; // Tăng buffer để đọc nhiều data hơn mỗi lần
         let mut disconnect_reason: Option<String> = None;
+
+        // Tính gap timeout động dựa vào baud rate
+        // Công thức: thời gian truyền 256 bytes, min 5ms, max 50ms
+        // Cho phép message interval ~50ms+ được tách riêng
+        let gap_timeout_ms: u64 = {
+            let time_for_256b = (256 * 10 * 1000) / baud as u64; // ms để truyền 256 bytes
+            time_for_256b.clamp(5, 50)
+        };
+
+        // Batching: tích lũy data và emit khi có "gap"
+        let mut accumulated_data: Vec<u8> = Vec::with_capacity(8192);
+        let mut last_data_received = Instant::now();
+        let mut has_pending_data = false;
 
         loop {
             // Kiểm tra xem có nên tiếp tục đọc không
@@ -225,21 +239,47 @@ fn open_port(
                 }
             };
 
+            // Tích lũy data
             if let Some(n) = bytes_read {
                 if n > 0 {
-                    let data = SerialData {
-                        port_name: port_name_clone.clone(),
-                        data: buffer[..n].to_vec(),
-                        timestamp: std::time::SystemTime::now()
-                            .duration_since(std::time::UNIX_EPOCH)
-                            .unwrap()
-                            .as_millis() as u64,
-                    };
-                    let _ = app_clone.emit("serial-data", data);
+                    accumulated_data.extend_from_slice(&buffer[..n]);
+                    last_data_received = Instant::now();
+                    has_pending_data = true;
                 }
             }
 
-            thread::sleep(Duration::from_millis(10));
+            // Emit khi có gap: có data pending và không nhận thêm data trong gap_timeout_ms
+            let should_emit = has_pending_data
+                && last_data_received.elapsed() > Duration::from_millis(gap_timeout_ms);
+
+            if should_emit {
+                let data = SerialData {
+                    port_name: port_name_clone.clone(),
+                    data: accumulated_data.clone(),
+                    timestamp: std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_millis() as u64,
+                };
+                let _ = app_clone.emit("serial-data", data);
+                accumulated_data.clear();
+                has_pending_data = false;
+            }
+
+            // Không cần sleep vì read timeout đã cung cấp delay
+        }
+
+        // Emit data còn lại trước khi exit
+        if !accumulated_data.is_empty() {
+            let data = SerialData {
+                port_name: port_name_clone.clone(),
+                data: accumulated_data,
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64,
+            };
+            let _ = app_clone.emit("serial-data", data);
         }
 
         // Nếu có lỗi (thiết bị bị rút), emit event thông báo
@@ -304,6 +344,7 @@ fn send_data(
     port_name: String,
     data: String,
     is_hex: bool,
+    byte_delay_us: Option<u64>, // Inter-byte delay (microseconds), 0 = disabled
 ) -> Result<String, String> {
     let ports = state.ports.lock();
     let port = ports
@@ -330,10 +371,36 @@ fn send_data(
     };
 
     let mut port = port.lock();
-    port.write_all(&bytes)
-        .map_err(|e| format!("Lỗi gửi dữ liệu: {}", e))?;
+    let total_bytes = bytes.len();
+    let delay = byte_delay_us.unwrap_or(0);
 
-    Ok(format!("Đã gửi {} bytes", bytes.len()))
+    if delay > 0 {
+        // Inter-byte delay mode: gửi từng byte với delay
+        for byte in bytes.iter() {
+            port.write_all(&[*byte])
+                .map_err(|e| format!("Lỗi gửi dữ liệu: {}", e))?;
+            thread::sleep(Duration::from_micros(delay));
+        }
+        port.flush()
+            .map_err(|e| format!("Lỗi flush: {}", e))?;
+    } else {
+        // Chunking mode: gửi theo chunk để tránh mất ký tự
+        const CHUNK_SIZE: usize = 256;
+
+        for chunk in bytes.chunks(CHUNK_SIZE) {
+            port.write_all(chunk)
+                .map_err(|e| format!("Lỗi gửi dữ liệu: {}", e))?;
+            port.flush()
+                .map_err(|e| format!("Lỗi flush: {}", e))?;
+
+            // Delay nhỏ giữa các chunk
+            if total_bytes > CHUNK_SIZE {
+                thread::sleep(Duration::from_micros(500));
+            }
+        }
+    }
+
+    Ok(format!("Đã gửi {} bytes", total_bytes))
 }
 
 // Kiểm tra trạng thái kết nối

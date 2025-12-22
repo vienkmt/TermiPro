@@ -134,6 +134,37 @@ const pendingCloseTabId = ref(null);
 let unlistenSerial = null;
 let unlistenDisconnect = null;
 
+// Batching for terminal updates (performance optimization)
+const pendingRxData = new Map(); // port_name -> [{data, timestamp}]
+let updateScheduled = false;
+
+function flushPendingData() {
+  for (const [portName, dataList] of pendingRxData) {
+    const tab = getTabByPortName(portName);
+    if (tab && dataList.length > 0) {
+      // Merge all pending data into entries
+      for (const item of dataList) {
+        // Limit terminal entries
+        if (tab.terminalData.length >= MAX_TERMINAL_ENTRIES) {
+          const removed = tab.terminalData.shift();
+          if (removed.type === 'tx') tab.txCount--;
+          else tab.rxCount--;
+        }
+
+        tab.terminalData.push({
+          type: "rx",
+          data: item.data,
+          timestamp: item.timestamp,
+        });
+        tab.rxCount++;
+        tab.totalRxCount++;
+      }
+    }
+  }
+  pendingRxData.clear();
+  updateScheduled = false;
+}
+
 // Computed
 const connectionStatus = computed(() => {
   if (!activeTab.value) return t.value.disconnected;
@@ -280,26 +311,23 @@ onMounted(async () => {
   // Refresh ports
   await refreshPorts();
 
-  // Global serial data listener - routes data to correct tab
+  // Global serial data listener - routes data to correct tab with batching
   unlistenSerial = await listen("serial-data", (event) => {
     const { port_name, data, timestamp } = event.payload;
 
-    // Find the tab that owns this port
-    const tab = getTabByPortName(port_name);
-    if (tab) {
-      // Limit terminal entries
-      if (tab.terminalData.length >= MAX_TERMINAL_ENTRIES) {
-        const removed = tab.terminalData.shift();
-        if (removed.type === 'tx') tab.txCount--;
-        else tab.rxCount--;
-      }
+    // Add to pending batch
+    if (!pendingRxData.has(port_name)) {
+      pendingRxData.set(port_name, []);
+    }
+    pendingRxData.get(port_name).push({
+      data: data,
+      timestamp: new Date(timestamp).toLocaleTimeString(),
+    });
 
-      tab.terminalData.push({
-        type: "rx",
-        data: data,
-        timestamp: new Date(timestamp).toLocaleTimeString(),
-      });
-      tab.rxCount++;
+    // Schedule update if not already scheduled
+    if (!updateScheduled) {
+      updateScheduled = true;
+      requestAnimationFrame(flushPendingData);
     }
   });
 
