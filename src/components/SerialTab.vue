@@ -1620,16 +1620,20 @@ onUnmounted(() => {
 }
 
 .auto-send-info {
-  padding: 6px 10px;
-  background: var(--success-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 8px;
+  background: #ea580c;
   border-radius: var(--radius-sm);
-  text-align: center;
 }
 
 .send-count {
-  font-size: 0.7rem;
-  font-weight: 600;
-  color: var(--success);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: white;
+  font-family: var(--font-mono);
+  line-height: 1;
 }
 
 /* Terminal Container */
@@ -1668,34 +1672,34 @@ onUnmounted(() => {
 .terminal-stats {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   margin-left: auto;
-  margin-right: 8px;
+  margin-right: 6px;
 }
 
 .stat-item {
   display: flex;
   align-items: center;
-  gap: 2px;
-  padding: 2px 6px;
-  border-radius: 3px;
-  font-size: 0.6rem;
+  gap: 1px;
+  padding: 1px 4px;
+  border-radius: 2px;
+  font-size: 0.55rem;
   font-weight: 600;
   font-family: var(--font-mono);
 }
 
 .stat-item.tx {
-  background: var(--warning);
+  background: #ea580c;
   color: white;
 }
 
 .stat-item.rx {
-  background: var(--success);
+  background: var(--accent-primary);
   color: white;
 }
 
 .stat-arrow {
-  font-size: 0.55rem;
+  font-size: 0.5rem;
   font-weight: 700;
 }
 
@@ -1734,46 +1738,46 @@ onUnmounted(() => {
 .terminal-line {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  margin-bottom: 2px;
+  gap: 6px;
+  padding: 3px 8px;
+  margin-bottom: 4px;
   background: var(--bg-secondary);
-  border-radius: var(--radius-sm);
+  border-radius: 2px;
   border-left: 2px solid transparent;
 }
 
 .terminal-line.tx {
-  border-left-color: var(--warning);
+  border-left-color: #ea580c;
 }
 
 .terminal-line.rx {
-  border-left-color: var(--success);
+  border-left-color: var(--accent-primary);
 }
 
 .terminal-line .timestamp {
   color: var(--text-tertiary);
-  font-size: 0.65rem;
-  min-width: 65px;
+  font-size: 0.6rem;
+  min-width: 58px;
   flex-shrink: 0;
 }
 
 .direction-badge {
-  padding: 1px 6px;
-  border-radius: 3px;
-  font-size: 0.6rem;
+  padding: 0px 4px;
+  border-radius: 2px;
+  font-size: 0.5rem;
   font-weight: 700;
-  min-width: 26px;
+  min-width: 20px;
   text-align: center;
 }
 
 .direction-badge.tx {
-  background: var(--warning-light);
-  color: var(--warning);
+  background: #ea580c;
+  color: white;
 }
 
 .direction-badge.rx {
-  background: var(--success-light);
-  color: var(--success);
+  background: var(--accent-primary);
+  color: white;
 }
 
 .terminal-line .data {
