@@ -1,6 +1,5 @@
 name: Build TermiPro
 
-# Chỉ build khi push code (không phải tag)
 on:
   push:
     branches: [main]
@@ -31,16 +30,25 @@ jobs:
           echo "VERSION=$version" >> $env:GITHUB_OUTPUT
         shell: pwsh
 
+      # ✅ Cache npm dependencies
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: 'npm'
 
+      # ✅ Cache Rust dependencies (quan trọng nhất - Rust build rất lâu)
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+
       - name: Install dependencies
-        run: npm install
+        run: npm ci  # ✅ Dùng npm ci thay vì npm install (nhanh hơn, deterministic)
 
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
