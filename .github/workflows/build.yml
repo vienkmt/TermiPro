@@ -1,5 +1,4 @@
 name: Build TermiPro
-
 on:
   push:
     branches: [main, master]
@@ -13,25 +12,20 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 20
-
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
-
+        uses: dtolnay/rust-toolchain@stable    # ← Sửa ở đây
       - name: Install dependencies
         run: npm install
-
       - name: Build Tauri app
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           args: --target x86_64-pc-windows-msvc
-
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -39,5 +33,3 @@ jobs:
           path: |
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/msi/*.msi
             src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
-
-
