@@ -497,37 +497,36 @@ body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 10px 16px;
+  padding: 5px 12px;
   background: var(--bg-secondary);
   border-bottom: 1px solid var(--border-color);
-  box-shadow: var(--shadow-sm);
   flex-shrink: 0;
 }
 
 .header-left {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .logo {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 32px;
-  height: 32px;
+  width: 22px;
+  height: 22px;
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
   border-radius: var(--radius-sm);
   color: white;
 }
 
 .logo svg {
-  width: 18px;
-  height: 18px;
+  width: 12px;
+  height: 12px;
 }
 
 .header h1 {
-  font-size: 1rem;
+  font-size: 0.8rem;
   font-weight: 700;
   color: var(--text-primary);
   letter-spacing: -0.02em;
@@ -536,27 +535,27 @@ body {
 .status-badge {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  border-radius: 50px;
-  font-size: 0.7rem;
+  gap: 4px;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 0.6rem;
   font-weight: 600;
   transition: all 0.3s ease;
 }
 
 .status-badge.connected {
-  background: var(--success-light);
-  color: var(--success);
+  background: var(--success);
+  color: white;
 }
 
 .status-badge.disconnected {
   background: var(--bg-tertiary);
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 5px;
+  height: 5px;
   border-radius: 50%;
   background: currentColor;
 }
@@ -574,14 +573,14 @@ body {
 .lang-switch {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
+  gap: 4px;
+  padding: 3px 6px;
   background: var(--bg-tertiary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: all 0.2s ease;
-  margin-left: 16px;
+  margin-left: 8px;
 }
 
 .lang-switch:hover {
@@ -593,10 +592,12 @@ body {
   flex-shrink: 0;
   border-radius: 2px;
   box-shadow: 0 0 0 1px rgba(0,0,0,0.1);
+  width: 16px;
+  height: 11px;
 }
 
 .lang-code {
-  font-size: 0.7rem;
+  font-size: 0.6rem;
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: 0.05em;
