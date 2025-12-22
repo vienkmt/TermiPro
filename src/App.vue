@@ -87,6 +87,10 @@ const translations = {
     changelog: "Thay đổi",
     currentVersion: "Phiên bản hiện tại",
     newVersion: "Phiên bản mới",
+    checkForUpdates: "Kiểm tra cập nhật",
+    checking: "Đang kiểm tra...",
+    noUpdateAvailable: "Bạn đang dùng phiên bản mới nhất",
+    updateError: "Lỗi kiểm tra cập nhật",
   },
   en: {
     // Status
@@ -161,6 +165,10 @@ const translations = {
     changelog: "Changelog",
     currentVersion: "Current version",
     newVersion: "New version",
+    checkForUpdates: "Check for updates",
+    checking: "Checking...",
+    noUpdateAvailable: "You're using the latest version",
+    updateError: "Update check failed",
   }
 };
 
@@ -196,8 +204,10 @@ const updateAvailable = ref(false);
 const updateInfo = ref(null);
 const showUpdateModal = ref(false);
 const updateProgress = ref(0);
-const updateStatus = ref('idle'); // idle, checking, downloading, installing, ready, error
+const updateStatus = ref('idle'); // idle, checking, downloading, installing, ready, error, noUpdate
 const currentVersion = ref('');
+const updateError = ref('');
+const isWindowsPlatform = ref(false);
 let updateCheckInterval = null;
 
 // Serial event listeners
@@ -386,8 +396,14 @@ function isWindows() {
 }
 
 // Check for updates (Windows only)
-async function checkForUpdates() {
+async function checkForUpdates(showModal = false) {
   if (!isWindows()) return;
+
+  if (showModal) {
+    updateStatus.value = 'checking';
+    updateError.value = '';
+    showUpdateModal.value = true;
+  }
 
   try {
     const update = await check();
@@ -399,20 +415,28 @@ async function checkForUpdates() {
         body: update.body, // Changelog from GitHub release notes
         date: update.date,
       };
+      if (showModal) {
+        updateStatus.value = 'idle';
+      }
     } else {
       updateAvailable.value = false;
       updateInfo.value = null;
+      if (showModal) {
+        updateStatus.value = 'noUpdate';
+      }
     }
   } catch (error) {
     console.error('Update check failed:', error);
+    updateError.value = error.message || String(error);
+    if (showModal) {
+      updateStatus.value = 'error';
+    }
   }
 }
 
 // Handle update button click
 function handleUpdateClick() {
-  if (updateAvailable.value) {
-    showUpdateModal.value = true;
-  }
+  checkForUpdates(true);
 }
 
 // Perform the update
@@ -485,11 +509,14 @@ onMounted(async () => {
   // Refresh ports
   await refreshPorts();
 
+  // Check platform
+  isWindowsPlatform.value = isWindows();
+
   // Check for updates on startup (Windows only)
   await checkForUpdates();
 
   // Check for updates every 30 minutes
-  updateCheckInterval = setInterval(checkForUpdates, 30 * 60 * 1000);
+  updateCheckInterval = setInterval(() => checkForUpdates(false), 30 * 60 * 1000);
 
   // Global serial data listener - routes data to correct tab with batching
   unlistenSerial = await listen("serial-data", (event) => {
@@ -582,17 +609,18 @@ onUnmounted(async () => {
       <div class="header-right">
         <!-- Update Button (Windows only) -->
         <button
-          v-if="updateAvailable"
+          v-if="isWindowsPlatform"
           class="update-btn"
+          :class="{ 'has-update': updateAvailable }"
           @click="handleUpdateClick"
-          :title="t.updateAvailable"
+          :title="updateAvailable ? t.updateAvailable : t.checkForUpdates"
         >
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="7 10 12 15 17 10"/>
             <line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
-          <span class="update-badge-dot">1</span>
+          <span v-if="updateAvailable" class="update-badge-dot">1</span>
         </button>
 
         <div class="status-badge" :class="connectionStatusClass">
@@ -644,6 +672,7 @@ onUnmounted(async () => {
       :current-version="currentVersion"
       :status="updateStatus"
       :progress="updateProgress"
+      :error-message="updateError"
       @confirm="performUpdate"
       @cancel="cancelUpdate"
     />
@@ -824,18 +853,28 @@ body {
   height: 32px;
   padding: 0;
   background: var(--bg-tertiary);
-  border: 2px solid var(--warning);
+  border: 1px solid var(--border-color);
   border-radius: var(--radius-md);
-  color: var(--warning);
+  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.2s ease;
   margin-right: 12px;
-  animation: blink-border 1.5s ease-in-out infinite;
 }
 
 .update-btn:hover {
-  background: var(--warning-light);
+  background: var(--bg-hover);
+  color: var(--text-primary);
   transform: scale(1.05);
+}
+
+.update-btn.has-update {
+  border: 2px solid var(--warning);
+  color: var(--warning);
+  animation: blink-border 1.5s ease-in-out infinite;
+}
+
+.update-btn.has-update:hover {
+  background: var(--warning-light);
 }
 
 @keyframes blink-border {

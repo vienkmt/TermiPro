@@ -16,11 +16,15 @@ const props = defineProps({
   },
   status: {
     type: String,
-    default: 'idle', // idle, downloading, installing, ready, error
+    default: 'idle', // idle, checking, downloading, installing, ready, error, noUpdate
   },
   progress: {
     type: Number,
     default: 0,
+  },
+  errorMessage: {
+    type: String,
+    default: '',
   },
 });
 
@@ -30,6 +34,8 @@ const t = inject('t');
 
 const statusText = computed(() => {
   switch (props.status) {
+    case 'checking':
+      return t.value.checking;
     case 'downloading':
       return `${t.value.downloading} ${Math.round(props.progress)}%`;
     case 'installing':
@@ -37,15 +43,22 @@ const statusText = computed(() => {
     case 'ready':
       return t.value.updateReady;
     case 'error':
-      return t.value.updateFailed;
+      return t.value.updateError;
+    case 'noUpdate':
+      return t.value.noUpdateAvailable;
     default:
       return '';
   }
 });
 
 const isProcessing = computed(() =>
-  ['downloading', 'installing', 'ready'].includes(props.status)
+  ['checking', 'downloading', 'installing', 'ready'].includes(props.status)
 );
+
+const isChecking = computed(() => props.status === 'checking');
+const isError = computed(() => props.status === 'error');
+const isNoUpdate = computed(() => props.status === 'noUpdate');
+const hasUpdate = computed(() => props.updateInfo && props.status === 'idle');
 
 // Simple markdown to HTML conversion for changelog
 function formatChangelog(text) {
@@ -74,34 +87,64 @@ function formatChangelog(text) {
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            <h3>{{ t.updateTitle }}</h3>
+            <h3>{{ hasUpdate ? t.updateTitle : t.checkForUpdates }}</h3>
           </div>
 
-          <!-- Version info -->
-          <div class="version-info">
-            <div class="version-row">
-              <span class="version-label">{{ t.currentVersion }}:</span>
-              <span class="version-value current">v{{ currentVersion }}</span>
-            </div>
-            <div class="version-arrow">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <polyline points="9 18 15 12 9 6"/>
-              </svg>
-            </div>
-            <div class="version-row">
-              <span class="version-label">{{ t.newVersion }}:</span>
-              <span class="version-value new">v{{ updateInfo?.version }}</span>
-            </div>
+          <!-- Checking state -->
+          <div v-if="isChecking" class="status-section checking">
+            <div class="spinner"></div>
+            <span>{{ statusText }}</span>
           </div>
 
-          <!-- Changelog -->
-          <div class="changelog-section">
-            <h4>{{ t.changelog }}</h4>
-            <div class="changelog-content" v-html="formatChangelog(updateInfo?.body)"></div>
+          <!-- No update available -->
+          <div v-else-if="isNoUpdate" class="status-section no-update">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <span class="status-message">{{ statusText }}</span>
+            <span class="version-current">v{{ currentVersion }}</span>
           </div>
 
-          <!-- Progress bar -->
-          <div v-if="isProcessing" class="progress-section">
+          <!-- Error state -->
+          <div v-else-if="isError" class="status-section error">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="15" y1="9" x2="9" y2="15"/>
+              <line x1="9" y1="9" x2="15" y2="15"/>
+            </svg>
+            <span class="status-message">{{ statusText }}</span>
+            <div class="error-details">{{ errorMessage }}</div>
+          </div>
+
+          <!-- Has update -->
+          <template v-else-if="hasUpdate">
+            <!-- Version info -->
+            <div class="version-info">
+              <div class="version-row">
+                <span class="version-label">{{ t.currentVersion }}:</span>
+                <span class="version-value current">v{{ currentVersion }}</span>
+              </div>
+              <div class="version-arrow">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <polyline points="9 18 15 12 9 6"/>
+                </svg>
+              </div>
+              <div class="version-row">
+                <span class="version-label">{{ t.newVersion }}:</span>
+                <span class="version-value new">v{{ updateInfo?.version }}</span>
+              </div>
+            </div>
+
+            <!-- Changelog -->
+            <div class="changelog-section">
+              <h4>{{ t.changelog }}</h4>
+              <div class="changelog-content" v-html="formatChangelog(updateInfo?.body)"></div>
+            </div>
+          </template>
+
+          <!-- Download/Install progress -->
+          <div v-if="['downloading', 'installing', 'ready'].includes(status)" class="progress-section">
             <div class="progress-bar">
               <div class="progress-fill" :style="{ width: progress + '%' }"></div>
             </div>
@@ -109,11 +152,15 @@ function formatChangelog(text) {
           </div>
 
           <!-- Actions -->
-          <div class="dialog-actions" v-if="!isProcessing">
+          <div class="dialog-actions">
             <button class="btn-cancel" @click="emit('cancel')">
-              {{ t.updateLater }}
+              {{ hasUpdate ? t.updateLater : 'OK' }}
             </button>
-            <button class="btn-confirm update-confirm" @click="emit('confirm')">
+            <button
+              v-if="hasUpdate"
+              class="btn-confirm update-confirm"
+              @click="emit('confirm')"
+            >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
                 <polyline points="7 10 12 15 17 10"/>
@@ -299,6 +346,69 @@ function formatChangelog(text) {
   color: var(--text-secondary);
   text-align: center;
   display: block;
+}
+
+/* Status sections */
+.status-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px 16px;
+  gap: 16px;
+}
+
+.status-section.checking {
+  color: var(--accent-primary);
+}
+
+.status-section.no-update svg {
+  color: var(--success);
+}
+
+.status-section.error svg {
+  color: var(--error, #ef4444);
+}
+
+.status-message {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.version-current {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+.error-details {
+  font-size: 0.8rem;
+  color: var(--error, #ef4444);
+  background: rgba(239, 68, 68, 0.1);
+  padding: 12px 16px;
+  border-radius: var(--radius-md);
+  max-width: 100%;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+/* Spinner */
+.spinner {
+  width: 32px;
+  height: 32px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 /* Actions */
