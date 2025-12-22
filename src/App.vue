@@ -46,6 +46,7 @@ const translations = {
     pleaseSelectPort: "Vui lòng chọn cổng serial!",
     pleaseEnterMessage: "Vui lòng nhập tin nhắn để gửi tự động!",
     pleaseConnectFirst: "Vui lòng kết nối trước!",
+    deviceDisconnected: "Thiết bị đã bị ngắt kết nối",
     // Tabs
     newTab: "Tab mới",
     closeTab: "Đóng tab",
@@ -91,6 +92,7 @@ const translations = {
     pleaseSelectPort: "Please select a serial port!",
     pleaseEnterMessage: "Please enter a message to auto send!",
     pleaseConnectFirst: "Please connect first!",
+    deviceDisconnected: "Device has been disconnected",
     // Tabs
     newTab: "New Tab",
     closeTab: "Close tab",
@@ -128,8 +130,9 @@ const ports = ref([]);
 const showConfirmDialog = ref(false);
 const pendingCloseTabId = ref(null);
 
-// Serial event listener
+// Serial event listeners
 let unlistenSerial = null;
+let unlistenDisconnect = null;
 
 // Computed
 const connectionStatus = computed(() => {
@@ -247,6 +250,28 @@ function handleAddTab() {
   createTab();
 }
 
+// Handle device disconnection (unplugged)
+function handleDeviceDisconnected(portName, reason) {
+  const tab = getTabByPortName(portName);
+  if (tab) {
+    // Update tab state
+    tab.isConnected = false;
+
+    // Stop auto send if running
+    if (tab.autoSendEnabled) {
+      tab.autoSendEnabled = false;
+      if (tab.autoSendTimer) {
+        clearInterval(tab.autoSendTimer);
+        tab.autoSendTimer = null;
+      }
+    }
+
+    // Show notification
+    console.warn(`Device disconnected: ${portName} - ${reason}`);
+    alert(`${t.value.deviceDisconnected}: ${portName}`);
+  }
+}
+
 // Lifecycle
 onMounted(async () => {
   // Create initial tab
@@ -277,12 +302,21 @@ onMounted(async () => {
       tab.rxCount++;
     }
   });
+
+  // Listen for device disconnection events
+  unlistenDisconnect = await listen("serial-disconnected", (event) => {
+    const { port_name, reason } = event.payload;
+    handleDeviceDisconnected(port_name, reason);
+  });
 });
 
 onUnmounted(async () => {
-  // Cleanup event listener
+  // Cleanup event listeners
   if (unlistenSerial) {
     unlistenSerial();
+  }
+  if (unlistenDisconnect) {
+    unlistenDisconnect();
   }
 
   // Close all connected ports
