@@ -32,6 +32,7 @@ const MAX_TERMINAL_ENTRIES = 500;
 const openDropdown = ref(null);
 const terminalRef = ref(null);
 const scrollPending = ref(false);
+const showSignalHelp = ref(false);
 
 // Config options
 const baudRateOptions = [9600, 19200, 57600, 115200, 460800, 921600];
@@ -529,6 +530,23 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+
+          <!-- DTR / RTS Switches -->
+          <div class="signal-row">
+            <div class="signal-toggles">
+              <label class="toggle-switch" :class="{ disabled: tabState.isConnected }">
+                <input type="checkbox" v-model="tabState.dtr" :disabled="tabState.isConnected" />
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">DTR</span>
+              </label>
+              <label class="toggle-switch" :class="{ disabled: tabState.isConnected }">
+                <input type="checkbox" v-model="tabState.rts" :disabled="tabState.isConnected" />
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">RTS</span>
+              </label>
+            </div>
+            <button class="btn-signal-help" @click="showSignalHelp = true" :title="t.signalHelp">?</button>
+          </div>
         </div>
       </div>
 
@@ -752,6 +770,91 @@ onUnmounted(() => {
         </div>
       </div>
     </main>
+
+    <!-- Signal Help Modal -->
+    <div class="modal-overlay" v-if="showSignalHelp" @click.self="showSignalHelp = false">
+      <div class="modal-content signal-help-modal">
+        <div class="modal-header">
+          <h3>{{ t.signalHelpTitle }}</h3>
+          <button class="modal-close" @click="showSignalHelp = false">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="18" y1="6" x2="6" y2="18"/>
+              <line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="signal-info">
+            <!-- DTR Section -->
+            <div class="signal-item">
+              <div class="signal-header">
+                <div class="signal-name">DTR</div>
+                <div class="signal-full">Data Terminal Ready</div>
+              </div>
+              <div class="signal-meaning">"{{ t.dtrMeaning }}"</div>
+              <div class="signal-desc">{{ t.dtrDesc }}</div>
+              <div class="signal-cases">
+                <div class="case-title">{{ t.whenToUse }}:</div>
+                <div class="case-row">
+                  <span class="case-label">{{ t.dtrCase1Label }}</span>
+                  <span class="case-value on">ON</span>
+                </div>
+                <div class="case-row">
+                  <span class="case-label">{{ t.dtrCase2Label }}</span>
+                  <span class="case-value off">OFF</span>
+                </div>
+                <div class="case-row">
+                  <span class="case-label">{{ t.dtrCase3Label }}</span>
+                  <span class="case-value on">ON</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- RTS Section -->
+            <div class="signal-item">
+              <div class="signal-header">
+                <div class="signal-name">RTS</div>
+                <div class="signal-full">Request To Send</div>
+              </div>
+              <div class="signal-meaning">"{{ t.rtsMeaning }}"</div>
+              <div class="signal-desc">{{ t.rtsDesc }}</div>
+              <div class="signal-cases">
+                <div class="case-title">{{ t.whenToUse }}:</div>
+                <div class="case-row">
+                  <span class="case-label">{{ t.rtsCase1Label }}</span>
+                  <span class="case-value on">ON</span>
+                </div>
+                <div class="case-row">
+                  <span class="case-label">{{ t.rtsCase2Label }}</span>
+                  <span class="case-value on">ON</span>
+                </div>
+                <div class="case-row">
+                  <span class="case-label">{{ t.rtsCase3Label }}</span>
+                  <span class="case-value off">OFF</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="signal-summary">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+              <polyline points="22 4 12 14.01 9 11.01"/>
+            </svg>
+            <span>{{ t.signalSummary }}</span>
+          </div>
+
+          <div class="signal-note">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <line x1="12" y1="16" x2="12" y2="12"/>
+              <line x1="12" y1="8" x2="12.01" y2="8"/>
+            </svg>
+            <span>{{ t.signalNote }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -787,7 +890,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   margin-bottom: 10px;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 0.7rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -1007,6 +1110,241 @@ onUnmounted(() => {
   font-size: 0.6rem;
   color: var(--warning);
   font-weight: 600;
+}
+
+/* Signal toggles (DTR/RTS) */
+.signal-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 6px;
+}
+
+.signal-toggles {
+  display: flex;
+  gap: 16px;
+}
+
+.signal-toggles .toggle-switch.disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.btn-signal-help {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: 50%;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-signal-help:hover {
+  background: var(--accent-light);
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
+}
+
+/* Signal Help Modal */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  backdrop-filter: blur(2px);
+}
+
+.modal-content {
+  background: var(--bg-primary);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 460px;
+  width: 90%;
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.modal-close:hover {
+  background: var(--danger-light);
+  color: var(--danger);
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.signal-info {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.signal-item {
+  padding: 12px;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  border-left: 3px solid var(--accent-primary);
+}
+
+.signal-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.signal-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  font-family: var(--font-mono);
+}
+
+.signal-full {
+  font-size: 0.7rem;
+  color: var(--text-tertiary);
+}
+
+.signal-meaning {
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-style: italic;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.signal-desc {
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin-bottom: 10px;
+}
+
+.signal-cases {
+  background: var(--bg-primary);
+  border-radius: var(--radius-sm);
+  padding: 8px;
+}
+
+.case-title {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: 6px;
+}
+
+.case-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.case-row:last-child {
+  border-bottom: none;
+}
+
+.case-label {
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.case-value {
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.case-value.on {
+  background: var(--success);
+  color: white;
+}
+
+.case-value.off {
+  background: var(--text-tertiary);
+  color: white;
+}
+
+.signal-summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 10px;
+  background: var(--success-light, #dcfce7);
+  border-radius: var(--radius-sm);
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--success);
+}
+
+.signal-summary svg {
+  flex-shrink: 0;
+}
+
+.signal-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  background: var(--warning-light);
+  border-radius: var(--radius-sm);
+  font-size: 0.7rem;
+  font-weight: 500;
+  color: var(--warning);
+}
+
+.signal-note svg {
+  flex-shrink: 0;
+  margin-top: 1px;
 }
 
 /* Config grid */

@@ -4,9 +4,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import TabBar from "./components/TabBar.vue";
 import SerialTab from "./components/SerialTab.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
+import UpdateModal from "./components/UpdateModal.vue";
 import { useTabStore } from "./stores/tabStore";
 
 // i18n Translations
@@ -56,6 +59,34 @@ const translations = {
     closeTabWarning: "Cổng serial đang kết nối. Bạn có muốn ngắt kết nối và đóng tab?",
     cancel: "Hủy",
     maxTabsReached: "Đã đạt giới hạn tab",
+    // Signal Help
+    signalHelp: "Trợ giúp tín hiệu",
+    signalHelpTitle: "Tín hiệu điều khiển",
+    dtrMeaning: "Máy tính đã sẵn sàng",
+    rtsMeaning: "Tôi muốn gửi dữ liệu",
+    dtrDesc: "Tín hiệu từ máy tính → thiết bị. Khi bật, báo cho thiết bị biết máy tính đang lắng nghe.",
+    rtsDesc: "Tín hiệu từ máy tính → thiết bị. Một số module dùng để điều khiển nguồn hoặc chế độ hoạt động.",
+    whenToUse: "Khi nào cần bật",
+    dtrCase1Label: "Arduino - reset khi kết nối",
+    dtrCase2Label: "Arduino - không reset",
+    dtrCase3Label: "ESP32/ESP8266 - chế độ flash",
+    rtsCase1Label: "ESP32/ESP8266 - chế độ flash",
+    rtsCase2Label: "Một số module RS485",
+    rtsCase3Label: "Đọc dữ liệu bình thường",
+    signalSummary: "90% trường hợp: Để cả 2 OFF (mặc định)",
+    signalNote: "Chỉ bật khi thiết bị không hoạt động hoặc tài liệu yêu cầu.",
+    // Update
+    updateAvailable: "Cập nhật mới",
+    updateTitle: "Phiên bản mới",
+    updateNow: "Cập nhật ngay",
+    updateLater: "Để sau",
+    downloading: "Đang tải xuống...",
+    installing: "Đang cài đặt...",
+    updateReady: "Sẵn sàng cập nhật",
+    updateFailed: "Cập nhật thất bại",
+    changelog: "Thay đổi",
+    currentVersion: "Phiên bản hiện tại",
+    newVersion: "Phiên bản mới",
   },
   en: {
     // Status
@@ -102,6 +133,34 @@ const translations = {
     closeTabWarning: "Serial port is connected. Disconnect and close tab?",
     cancel: "Cancel",
     maxTabsReached: "Maximum tabs reached",
+    // Signal Help
+    signalHelp: "Signal help",
+    signalHelpTitle: "Control Signals",
+    dtrMeaning: "Computer is ready",
+    rtsMeaning: "I want to send data",
+    dtrDesc: "Signal from computer → device. When enabled, tells the device the computer is listening.",
+    rtsDesc: "Signal from computer → device. Some modules use it for power control or operating mode.",
+    whenToUse: "When to enable",
+    dtrCase1Label: "Arduino - reset on connect",
+    dtrCase2Label: "Arduino - no reset",
+    dtrCase3Label: "ESP32/ESP8266 - flash mode",
+    rtsCase1Label: "ESP32/ESP8266 - flash mode",
+    rtsCase2Label: "Some RS485 modules",
+    rtsCase3Label: "Normal data reading",
+    signalSummary: "90% of cases: Keep both OFF (default)",
+    signalNote: "Only enable when device doesn't work or documentation requires it.",
+    // Update
+    updateAvailable: "Update available",
+    updateTitle: "New Version",
+    updateNow: "Update Now",
+    updateLater: "Later",
+    downloading: "Downloading...",
+    installing: "Installing...",
+    updateReady: "Ready to update",
+    updateFailed: "Update failed",
+    changelog: "Changelog",
+    currentVersion: "Current version",
+    newVersion: "New version",
   }
 };
 
@@ -131,6 +190,15 @@ const ports = ref([]);
 // Confirmation dialog state
 const showConfirmDialog = ref(false);
 const pendingCloseTabId = ref(null);
+
+// Update state (Windows only)
+const updateAvailable = ref(false);
+const updateInfo = ref(null);
+const showUpdateModal = ref(false);
+const updateProgress = ref(0);
+const updateStatus = ref('idle'); // idle, checking, downloading, installing, ready, error
+const currentVersion = ref('');
+let updateCheckInterval = null;
 
 // Serial event listeners
 let unlistenSerial = null;
@@ -204,6 +272,8 @@ async function handleConnect(tabId) {
       data_bits: tab.dataBits,
       stop_bits: tab.stopBits,
       parity: tab.parity,
+      dtr: tab.dtr,
+      rts: tab.rts,
     };
 
     await invoke("open_port", { config });
@@ -236,19 +306,24 @@ async function handleDisconnect(tabId) {
   }
 }
 
-function requestCloseTab(tabId) {
+async function requestCloseTab(tabId) {
   const tab = tabs.get(tabId);
   if (!tab) return;
 
+  // Auto disconnect if connected
   if (tab.isConnected) {
-    pendingCloseTabId.value = tabId;
-    showConfirmDialog.value = true;
-  } else {
-    closeTab(tabId);
-    // Create new tab if all tabs are closed
-    if (tabs.size === 0) {
-      createTab();
+    try {
+      await invoke("close_port", { portName: tab.selectedPort });
+      tab.isConnected = false;
+    } catch (error) {
+      console.error("Error closing port:", error);
     }
+  }
+
+  closeTab(tabId);
+  // Create new tab if all tabs are closed
+  if (tabs.size === 0) {
+    createTab();
   }
 }
 
@@ -305,11 +380,100 @@ function handleDeviceDisconnected(portName, reason) {
   }
 }
 
+// Check if running on Windows
+function isWindows() {
+  return navigator.userAgent.includes('Windows');
+}
+
+// Check for updates (Windows only)
+async function checkForUpdates() {
+  if (!isWindows()) return;
+
+  try {
+    const update = await check();
+
+    if (update) {
+      updateAvailable.value = true;
+      updateInfo.value = {
+        version: update.version,
+        body: update.body, // Changelog from GitHub release notes
+        date: update.date,
+      };
+    } else {
+      updateAvailable.value = false;
+      updateInfo.value = null;
+    }
+  } catch (error) {
+    console.error('Update check failed:', error);
+  }
+}
+
+// Handle update button click
+function handleUpdateClick() {
+  if (updateAvailable.value) {
+    showUpdateModal.value = true;
+  }
+}
+
+// Perform the update
+async function performUpdate() {
+  if (!updateInfo.value) return;
+
+  updateStatus.value = 'downloading';
+
+  try {
+    const update = await check();
+
+    if (update) {
+      let downloaded = 0;
+      let contentLength = 0;
+
+      // Download with progress
+      await update.downloadAndInstall((event) => {
+        switch (event.event) {
+          case 'Started':
+            contentLength = event.data.contentLength || 0;
+            updateProgress.value = 0;
+            break;
+          case 'Progress':
+            downloaded += event.data.chunkLength;
+            if (contentLength > 0) {
+              updateProgress.value = Math.round((downloaded / contentLength) * 100);
+            }
+            break;
+          case 'Finished':
+            updateProgress.value = 100;
+            updateStatus.value = 'installing';
+            break;
+        }
+      });
+
+      updateStatus.value = 'ready';
+
+      // Relaunch after short delay
+      setTimeout(async () => {
+        await relaunch();
+      }, 1000);
+    }
+  } catch (error) {
+    console.error('Update failed:', error);
+    updateStatus.value = 'error';
+  }
+}
+
+// Cancel update modal
+function cancelUpdate() {
+  showUpdateModal.value = false;
+  updateStatus.value = 'idle';
+  updateProgress.value = 0;
+}
+
 // Lifecycle
 onMounted(async () => {
   // Set window title with version
   try {
     const version = await getVersion();
+    currentVersion.value = version;
     await getCurrentWindow().setTitle(`TermiPro by vienkmt - v${version}`);
   } catch (e) {
     console.warn('Could not set window title:', e);
@@ -320,6 +484,12 @@ onMounted(async () => {
 
   // Refresh ports
   await refreshPorts();
+
+  // Check for updates on startup (Windows only)
+  await checkForUpdates();
+
+  // Check for updates every 30 minutes
+  updateCheckInterval = setInterval(checkForUpdates, 30 * 60 * 1000);
 
   // Global serial data listener - routes data to correct tab with batching
   unlistenSerial = await listen("serial-data", (event) => {
@@ -355,6 +525,11 @@ onUnmounted(async () => {
   }
   if (unlistenDisconnect) {
     unlistenDisconnect();
+  }
+
+  // Clear update check interval
+  if (updateCheckInterval) {
+    clearInterval(updateCheckInterval);
   }
 
   // Close all connected ports
@@ -405,6 +580,21 @@ onUnmounted(async () => {
         </button>
       </div>
       <div class="header-right">
+        <!-- Update Button (Windows only) -->
+        <button
+          v-if="updateAvailable"
+          class="update-btn"
+          @click="handleUpdateClick"
+          :title="t.updateAvailable"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          <span class="update-badge-dot">1</span>
+        </button>
+
         <div class="status-badge" :class="connectionStatusClass">
           <span class="status-dot"></span>
           <span class="status-text">{{ connectionStatus }}</span>
@@ -445,6 +635,17 @@ onUnmounted(async () => {
       :visible="showConfirmDialog"
       @confirm="confirmCloseTab"
       @cancel="cancelCloseTab"
+    />
+
+    <!-- Update Modal -->
+    <UpdateModal
+      :visible="showUpdateModal"
+      :update-info="updateInfo"
+      :current-version="currentVersion"
+      :status="updateStatus"
+      :progress="updateProgress"
+      @confirm="performUpdate"
+      @cancel="cancelUpdate"
     />
   </div>
 </template>
@@ -611,6 +812,58 @@ body {
   font-weight: 600;
   color: var(--text-primary);
   letter-spacing: 0.05em;
+}
+
+/* Update Button */
+.update-btn {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  background: var(--bg-tertiary);
+  border: 2px solid var(--warning);
+  border-radius: var(--radius-md);
+  color: var(--warning);
+  cursor: pointer;
+  transition: all 0.2s ease;
+  margin-right: 12px;
+  animation: blink-border 1.5s ease-in-out infinite;
+}
+
+.update-btn:hover {
+  background: var(--warning-light);
+  transform: scale(1.05);
+}
+
+@keyframes blink-border {
+  0%, 100% {
+    border-color: var(--warning);
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+  50% {
+    border-color: var(--warning);
+    box-shadow: 0 0 8px 3px rgba(245, 158, 11, 0.4);
+  }
+}
+
+.update-badge-dot {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: var(--danger);
+  border-radius: 50%;
+  font-size: 0.6rem;
+  font-weight: 700;
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Main Content */

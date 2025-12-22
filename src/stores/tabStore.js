@@ -41,6 +41,8 @@ export function useTabStore() {
       dataBits: 8,
       stopBits: '1',
       parity: 'none',
+      dtr: false,
+      rts: false,
 
       // Auto-send state
       autoSendEnabled: false,
