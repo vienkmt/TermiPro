@@ -8,6 +8,7 @@ export const CONNECTION_TYPES = {
   SERIAL: 'serial',
   TCP_CLIENT: 'tcp_client',
   TCP_SERVER: 'tcp_server',
+  MODBUS: 'modbus',
 };
 
 // Singleton store instance
@@ -105,6 +106,61 @@ export function useTabStore() {
     });
   }
 
+  // Modbus Master tab state
+  function createModbusTabState(id) {
+    return reactive({
+      id,
+      connectionType: CONNECTION_TYPES.MODBUS,
+      connectionId: id,
+      isConnected: false,
+
+      // Mode: 'rtu' or 'tcp'
+      mode: 'rtu',
+
+      // RTU Config (Serial)
+      selectedPort: '',
+      baudRate: 9600,
+      dataBits: 8,
+      stopBits: '1',
+      parity: 'even', // Modbus default is even parity
+      slaveId: 1,
+
+      // TCP Config
+      host: 'localhost',
+      port: 502, // Standard Modbus TCP port
+      unitId: 1,
+
+      // Common Config
+      responseTimeout: 1000,
+
+      // Current Request
+      functionCode: 3, // Read Holding Registers
+      startAddress: 0,
+      quantity: 10,
+      writeValues: [],
+      coilValues: [],
+
+      // Data Display
+      dataFormat: 'unsigned', // unsigned, signed, hex, float32, binary
+      registerData: [], // [{address, value, rawHex}]
+      coilData: [], // [{address, value}]
+
+      // Transaction Log
+      transactionLog: [], // [{id, type, timestamp, functionCode, requestFrame, responseFrame, success, responseTime, data}]
+      maxLogEntries: 100,
+
+      // Polling
+      pollingEnabled: false,
+      pollingInterval: 1000,
+      pollRequests: [], // [{functionCode, startAddress, quantity}]
+
+      // Status
+      connectionStatus: 'idle', // idle, connected, disconnected, error
+      statusMessage: null,
+      lastResponseTime: null,
+    });
+  }
+
   // Create a new tab with specified connection type
   function createTab(connectionType = CONNECTION_TYPES.SERIAL) {
     if (!canAddTab.value) return null;
@@ -118,6 +174,9 @@ export function useTabStore() {
         break;
       case CONNECTION_TYPES.TCP_SERVER:
         tabState = createTcpServerTabState(id);
+        break;
+      case CONNECTION_TYPES.MODBUS:
+        tabState = createModbusTabState(id);
         break;
       default:
         tabState = createSerialTabState(id);
@@ -182,7 +241,7 @@ export function useTabStore() {
     return null;
   }
 
-  // Get tab by connection ID (for TCP event routing)
+  // Get tab by connection ID (for TCP/Modbus event routing)
   function getTabByConnectionId(connectionId) {
     for (const [, tab] of tabs) {
       if (tab.connectionType === CONNECTION_TYPES.TCP_CLIENT &&
@@ -192,6 +251,23 @@ export function useTabStore() {
       if (tab.connectionType === CONNECTION_TYPES.TCP_SERVER &&
           tab.serverId === connectionId) {
         return tab;
+      }
+      if (tab.connectionType === CONNECTION_TYPES.MODBUS &&
+          tab.connectionId === connectionId) {
+        return tab;
+      }
+    }
+    return null;
+  }
+
+  // Get Modbus tab by connection ID prefix
+  function getModbusTabByConnectionId(connectionId) {
+    for (const [, tab] of tabs) {
+      if (tab.connectionType === CONNECTION_TYPES.MODBUS) {
+        // Match by exact connectionId or by stored modbusConnectionId
+        if (tab.connectionId === connectionId || tab.modbusConnectionId === connectionId) {
+          return tab;
+        }
       }
     }
     return null;
@@ -237,6 +313,7 @@ export function useTabStore() {
     setActiveTab,
     getTabByPortName,
     getTabByConnectionId,
+    getModbusTabByConnectionId,
     isPortConnected,
     getConnectedPorts,
 

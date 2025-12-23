@@ -85,6 +85,19 @@ function selectType(type) {
                 <p>{{ t.tcpServerDesc }}</p>
               </div>
             </div>
+
+            <!-- Modbus Master -->
+            <div class="type-card" @click="selectType(CONNECTION_TYPES.MODBUS)">
+              <div class="type-icon modbus">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+                </svg>
+              </div>
+              <div class="type-info">
+                <h4>{{ t.connectionTypeModbus }}</h4>
+                <p>{{ t.modbusDesc }}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -204,6 +217,11 @@ function selectType(type) {
 
 .type-icon.tcp-server {
   background: linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%);
+  color: white;
+}
+
+.type-icon.modbus {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
   color: white;
 }
 
