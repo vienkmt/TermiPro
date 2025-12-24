@@ -1,17 +1,31 @@
-name: Release TermiPro
+name: Build & Release TermiPro
 
-# Chỉ chạy khi push tag
 on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      skip_release:
+        description: 'Skip release (build only)'
+        required: false
+        default: false
+        type: boolean
+
+# Tự động hủy build cũ khi có build mới
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+  TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      actions: read
+  build-windows:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.VERSION }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -19,16 +33,67 @@ jobs:
       - name: Get version from tag
         id: version
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          if ("${{ github.ref_type }}" -eq "tag") {
+            $version = "${{ github.ref_name }}".TrimStart("v")
+          } else {
+            $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          }
+          echo "VERSION=$version" >> $env:GITHUB_OUTPUT
+          echo "Building version: $version"
+        shell: pwsh
 
-      - name: Download artifacts from latest build
-        uses: dawidd6/action-download-artifact@v3
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          workflow: build.yml
+          node-version: 20
+          cache: 'npm'
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target x86_64-pc-windows-msvc --bundles nsis
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TermiPro-Windows-Setup
+          path: |
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.sig
+          if-no-files-found: error
+          retention-days: 30
+
+  release:
+    needs: build-windows
+    if: startsWith(github.ref, 'refs/tags/') && github.event.inputs.skip_release != 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout (for git history)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
           name: TermiPro-Windows-Setup
           path: artifacts/windows
-          search_artifacts: true
 
       - name: List downloaded files
         run: |
@@ -37,9 +102,8 @@ jobs:
 
       - name: Create latest.json for updater
         run: |
-          VERSION="${{ steps.version.outputs.VERSION }}"
+          VERSION="${{ needs.build-windows.outputs.version }}"
 
-          # Find the exe and sig files
           SETUP_FILE=$(ls artifacts/windows/*.exe 2>/dev/null | head -1)
           SIG_FILE=$(ls artifacts/windows/*.sig 2>/dev/null | head -1)
 
@@ -50,15 +114,29 @@ jobs:
           fi
 
           SETUP_FILENAME=$(basename "$SETUP_FILE")
-
-          # Read signature
           SIGNATURE=$(cat "$SIG_FILE")
 
-          # Create latest.json
+          # Lấy tag trước đó
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+
+          # Lấy changelog từ tag trước đến hiện tại
+          if [ -n "$PREV_TAG" ]; then
+            CHANGELOG=$(git log ${PREV_TAG}..HEAD --pretty=format:"• %s" --no-merges | head -20)
+          else
+            # Nếu không có tag trước, lấy 10 commits gần nhất
+            CHANGELOG=$(git log -10 --pretty=format:"• %s" --no-merges)
+          fi
+
+          # Escape JSON characters
+          CHANGELOG_ESCAPED=$(echo "$CHANGELOG" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g')
+
+          echo "Changelog:"
+          echo "$CHANGELOG"
+
           cat > artifacts/latest.json << EOF
           {
             "version": "$VERSION",
-            "notes": "See the release notes at https://github.com/${{ github.repository }}/releases/tag/${{ github.ref_name }}",
+            "notes": "$CHANGELOG_ESCAPED",
             "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "platforms": {
               "windows-x86_64": {

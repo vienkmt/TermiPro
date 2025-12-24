@@ -61,6 +61,30 @@ function getTabDisplayName(tabId) {
     return t.value.tcpServer;
   }
 
+  // Modbus tab
+  if (tab.connectionType === 'modbus') {
+    if (tab.isConnected) {
+      if (tab.mode === 'rtu') {
+        return `MB:${tab.selectedPort?.split('/').pop() || 'RTU'}`;
+      } else {
+        return `MB:${tab.host}:${tab.port}`;
+      }
+    }
+    return tab.mode === 'rtu' ? 'Modbus RTU' : 'Modbus TCP';
+  }
+
+  // Modbus Slave tab
+  if (tab.connectionType === 'modbus_slave') {
+    if (tab.isConnected) {
+      if (tab.mode === 'rtu') {
+        return `MS:${tab.selectedPort?.split('/').pop() || 'RTU'}`;
+      } else {
+        return `MS:${tab.listenPort}`;
+      }
+    }
+    return tab.mode === 'rtu' ? 'Slave RTU' : 'Slave TCP';
+  }
+
   return t.value.newTab;
 }
 
@@ -83,7 +107,9 @@ function isTabConnected(tabId) {
           connected: isTabConnected(tabId),
           'type-serial': getConnectionType(tabId) === 'serial',
           'type-tcp-client': getConnectionType(tabId) === 'tcp_client',
-          'type-tcp-server': getConnectionType(tabId) === 'tcp_server'
+          'type-tcp-server': getConnectionType(tabId) === 'tcp_server',
+          'type-modbus': getConnectionType(tabId) === 'modbus',
+          'type-modbus-slave': getConnectionType(tabId) === 'modbus_slave'
         }"
         @click="emit('selectTab', tabId)"
       >
@@ -113,6 +139,19 @@ function isTabConnected(tabId) {
           <circle cx="6" cy="6" r="1" fill="currentColor"/>
           <circle cx="6" cy="18" r="1" fill="currentColor"/>
           <path d="M12 9v6"/>
+        </svg>
+        <!-- Modbus Icon -->
+        <svg v-else-if="getConnectionType(tabId) === 'modbus'" class="tab-icon modbus-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+        <!-- Modbus Slave Icon -->
+        <svg v-else-if="getConnectionType(tabId) === 'modbus_slave'" class="tab-icon modbus-slave-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="4" y="2" width="16" height="6" rx="1"/>
+          <rect x="4" y="9" width="16" height="6" rx="1"/>
+          <rect x="4" y="16" width="16" height="6" rx="1"/>
+          <circle cx="7" cy="5" r="1" fill="currentColor"/>
+          <circle cx="7" cy="12" r="1" fill="currentColor"/>
+          <circle cx="7" cy="19" r="1" fill="currentColor"/>
         </svg>
         <span class="tab-name">{{ getTabDisplayName(tabId) }}</span>
         <span v-if="isTabConnected(tabId)" class="connection-dot"></span>
@@ -227,6 +266,14 @@ function isTabConnected(tabId) {
 
 .tab.type-serial.active .tab-icon {
   color: #10b981;
+}
+
+.tab.type-modbus.active .tab-icon {
+  color: #f59e0b;
+}
+
+.tab.type-modbus-slave.active .tab-icon {
+  color: #6366f1;
 }
 
 .tab-name {
