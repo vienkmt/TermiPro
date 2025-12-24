@@ -64,12 +64,16 @@ const isReadOperation = computed(() => currentFunctionCode.value?.type === 'read
 const isWriteOperation = computed(() => currentFunctionCode.value?.type?.startsWith('write'));
 const isSingleWrite = computed(() => currentFunctionCode.value?.type === 'write-single');
 const isCoilOperation = computed(() => currentFunctionCode.value?.isCoil);
+const isDiscreteInputOperation = computed(() => props.tabState.functionCode === 2);
 
 // Displayed log entries - limit and reverse for performance (newest at bottom)
 const displayedLogEntries = computed(() => {
   const log = props.tabState.transactionLog || [];
+  console.log('displayedLogEntries computed, log length:', log.length, 'log:', log);
   // Take last MAX_VISIBLE_ENTRIES and reverse so newest is at bottom
-  return log.slice(0, MAX_VISIBLE_ENTRIES).reverse();
+  const result = log.slice(0, MAX_VISIBLE_ENTRIES).reverse();
+  console.log('displayedLogEntries result:', result.length, result);
+  return result;
 });
 
 // Helpers
@@ -141,6 +145,7 @@ async function toggleConnection() {
 
 // Send Modbus request
 async function sendRequest() {
+  console.log('sendRequest called, isConnected:', props.tabState.isConnected, 'modbusConnectionId:', props.tabState.modbusConnectionId);
   if (!props.tabState.isConnected || isLoading.value) return;
 
   isLoading.value = true;
@@ -156,7 +161,9 @@ async function sendRequest() {
       coil_values: isCoilOperation.value && isWriteOperation.value ? props.tabState.coilValues : null,
     };
 
+    console.log('Sending request:', request);
     const response = await invoke('modbus_request', { request });
+    console.log('Response received:', response);
 
     // Add to transaction log
     addToLog({
@@ -182,10 +189,16 @@ async function sendRequest() {
         }));
       }
       if (response.coils) {
-        props.tabState.coilData = response.coils.slice(0, props.tabState.quantity).map((value, index) => ({
+        const coilDataArray = response.coils.slice(0, props.tabState.quantity).map((value, index) => ({
           address: props.tabState.startAddress + index,
           value: value,
         }));
+        // FC01 = Coils, FC02 = Discrete Inputs
+        if (props.tabState.functionCode === 1) {
+          props.tabState.coilData = coilDataArray;
+        } else if (props.tabState.functionCode === 2) {
+          props.tabState.discreteInputData = coilDataArray;
+        }
       }
       props.tabState.lastResponseTime = response.response_time_ms;
     }
@@ -213,7 +226,16 @@ function addToLog(entry) {
     ...entry,
   };
 
+  console.log('addToLog called, entry:', logEntry);
+  console.log('transactionLog before:', props.tabState.transactionLog?.length, props.tabState.transactionLog);
+
+  if (!props.tabState.transactionLog) {
+    console.error('transactionLog is undefined!');
+    props.tabState.transactionLog = [];
+  }
+
   props.tabState.transactionLog.unshift(logEntry);
+  console.log('transactionLog after:', props.tabState.transactionLog.length);
 
   // Trim old entries
   if (props.tabState.transactionLog.length > MAX_LOG_ENTRIES) {
@@ -228,6 +250,7 @@ function clearLog() {
 function clearData() {
   props.tabState.registerData = [];
   props.tabState.coilData = [];
+  props.tabState.discreteInputData = [];
 }
 
 // Polling
@@ -247,6 +270,9 @@ async function startPolling() {
 
     await invoke('modbus_start_polling', { config });
     props.tabState.pollingEnabled = true;
+
+    // Do an immediate first read
+    sendRequest();
   } catch (error) {
     console.error('Start polling error:', error);
     alert('Error: ' + error);
@@ -267,7 +293,7 @@ async function stopPolling() {
 }
 
 // Initialize write values when FC changes
-watch(() => props.tabState.functionCode, (newFc) => {
+watch(() => props.tabState.functionCode, (newFc, oldFc) => {
   const fc = functionCodes.find(f => f.value === newFc);
   if (fc?.type === 'write-single') {
     props.tabState.writeValues = [0];
@@ -275,6 +301,39 @@ watch(() => props.tabState.functionCode, (newFc) => {
   } else if (fc?.type === 'write-multiple') {
     props.tabState.writeValues = props.tabState.writeValues.length > 0 ? props.tabState.writeValues : [0];
     props.tabState.coilValues = props.tabState.coilValues.length > 0 ? props.tabState.coilValues : [false];
+  }
+
+  // Stop polling and clear data when FC changes
+  if (oldFc !== undefined && props.tabState.isConnected) {
+    // Stop polling if active
+    if (props.tabState.pollingEnabled) {
+      stopPolling();
+    }
+    // Clear old data
+    clearData();
+  }
+});
+
+// Stop polling and clear data when start address or quantity changes
+watch(() => props.tabState.startAddress, (newVal, oldVal) => {
+  if (props.tabState.isConnected && oldVal !== undefined) {
+    if (props.tabState.pollingEnabled) {
+      stopPolling();
+    }
+    if (isReadOperation.value) {
+      clearData();
+    }
+  }
+});
+
+watch(() => props.tabState.quantity, (newVal, oldVal) => {
+  if (props.tabState.isConnected && oldVal !== undefined) {
+    if (props.tabState.pollingEnabled) {
+      stopPolling();
+    }
+    if (isReadOperation.value) {
+      clearData();
+    }
   }
 });
 
@@ -528,6 +587,18 @@ function removeWriteValue(index) {
             step="100"
           />
         </div>
+
+        <div class="field-row">
+          <label>Poll Int. (ms)</label>
+          <input
+            type="number"
+            v-model.number="tabState.pollingInterval"
+            :disabled="tabState.pollingEnabled"
+            min="100"
+            max="60000"
+            step="100"
+          />
+        </div>
       </div>
 
       <!-- Connect Button -->
@@ -633,58 +704,41 @@ function removeWriteValue(index) {
           </button>
         </div>
 
-        <button
-          class="btn-send"
-          @click="sendRequest"
-          :disabled="!tabState.isConnected || isLoading"
-        >
-          <svg v-if="!isLoading" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="22" y1="2" x2="11" y2="13"/>
-            <polygon points="22 2 15 22 11 13 2 9 22 2"/>
-          </svg>
-          <span v-if="isLoading" class="spinner"></span>
-          <span>{{ isReadOperation ? 'Read' : 'Write' }}</span>
-        </button>
-      </div>
-
-      <!-- Polling -->
-      <div class="config-card" :class="{ disabled: !tabState.isConnected }">
-        <div class="card-header">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <polyline points="23 4 23 10 17 10"/>
-            <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-          </svg>
-          <span>Polling</span>
-          <span v-if="tabState.pollingEnabled" class="badge polling">Active</span>
-        </div>
-
-        <div class="field-row">
-          <label>Interval (ms)</label>
-          <input
-            type="number"
-            v-model.number="tabState.pollingInterval"
-            :disabled="tabState.pollingEnabled"
-            min="100"
-            max="60000"
-            step="100"
-          />
-        </div>
-
-        <div class="polling-buttons">
+        <div class="request-buttons">
           <button
-            v-if="!tabState.pollingEnabled"
-            class="btn-start-poll"
-            @click="startPolling"
-            :disabled="!tabState.isConnected || !isReadOperation"
+            class="btn-request"
+            @click="sendRequest"
+            :disabled="!tabState.isConnected || isLoading"
           >
-            Start
+            <svg v-if="!isLoading" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <line x1="22" y1="2" x2="11" y2="13"/>
+              <polygon points="22 2 15 22 11 13 2 9 22 2"/>
+            </svg>
+            <span v-if="isLoading" class="spinner"></span>
+            <span>{{ isReadOperation ? 'Read' : 'Write' }}</span>
           </button>
           <button
-            v-else
-            class="btn-stop-poll"
+            v-if="isReadOperation && !tabState.pollingEnabled"
+            class="btn-request auto"
+            @click="startPolling"
+            :disabled="!tabState.isConnected"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <polyline points="23 4 23 10 17 10"/>
+              <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
+            </svg>
+            <span>Auto Read</span>
+          </button>
+          <button
+            v-if="isReadOperation && tabState.pollingEnabled"
+            class="btn-request auto active"
             @click="stopPolling"
           >
-            Stop
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="6" y="4" width="4" height="16"/>
+              <rect x="14" y="4" width="4" height="16"/>
+            </svg>
+            <span>Stop</span>
           </button>
         </div>
       </div>
@@ -697,7 +751,7 @@ function removeWriteValue(index) {
       <!-- Data Display -->
       <div class="data-section">
         <div class="section-header">
-          <h3>{{ isCoilOperation ? 'Coils' : 'Registers' }}</h3>
+          <h3>{{ tabState.functionCode === 1 ? 'Coils' : tabState.functionCode === 2 ? 'Discrete Inputs' : tabState.functionCode === 3 ? 'Holding Registers' : tabState.functionCode === 4 ? 'Input Registers' : 'Data' }}</h3>
           <div class="format-selector">
             <span>Format:</span>
             <div class="dropdown-item mini" :class="{ open: openDropdown === 'dataFormat' }" @click.stop="toggleDropdown('dataFormat')">
@@ -729,26 +783,8 @@ function removeWriteValue(index) {
         </div>
 
         <div class="data-table-container">
-          <!-- Register Table -->
-          <table v-if="tabState.registerData.length > 0" class="data-table">
-            <thead>
-              <tr>
-                <th>Address</th>
-                <th>Value</th>
-                <th>Hex</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="reg in tabState.registerData" :key="reg.address">
-                <td class="addr">{{ formatAddress(reg.address) }}</td>
-                <td class="value">{{ formatValue(reg.value, tabState.dataFormat) }}</td>
-                <td class="hex">0x{{ reg.rawHex }}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <!-- Coil Table -->
-          <table v-else-if="tabState.coilData.length > 0" class="data-table coil-table">
+          <!-- Coil Table (FC01) -->
+          <table v-if="tabState.functionCode === 1 && tabState.coilData.length > 0" class="data-table coil-table">
             <thead>
               <tr>
                 <th>Address</th>
@@ -765,7 +801,44 @@ function removeWriteValue(index) {
             </tbody>
           </table>
 
-          <div v-else class="empty-data">
+          <!-- Discrete Input Table (FC02) -->
+          <table v-else-if="tabState.functionCode === 2 && tabState.discreteInputData.length > 0" class="data-table coil-table">
+            <thead>
+              <tr>
+                <th>Address</th>
+                <th>Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="di in tabState.discreteInputData" :key="di.address">
+                <td class="addr">{{ formatAddress(di.address) }}</td>
+                <td class="value" :class="{ 'coil-on': di.value, 'coil-off': !di.value }">
+                  {{ di.value ? 'ON' : 'OFF' }}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Register Table (FC03/FC04) -->
+          <table v-else-if="(tabState.functionCode === 3 || tabState.functionCode === 4) && tabState.registerData.length > 0" class="data-table">
+            <thead>
+              <tr>
+                <th>Address</th>
+                <th>Value</th>
+                <th>Hex</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="reg in tabState.registerData" :key="reg.address">
+                <td class="addr">{{ formatAddress(reg.address) }}</td>
+                <td class="value">{{ formatValue(reg.value, tabState.dataFormat) }}</td>
+                <td class="hex">0x{{ reg.rawHex }}</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <!-- Empty state for read operations -->
+          <div v-else-if="tabState.functionCode <= 4" class="empty-data">
             <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
               <polyline points="14 2 14 8 20 8"/>
@@ -773,7 +846,16 @@ function removeWriteValue(index) {
               <line x1="16" y1="17" x2="8" y2="17"/>
               <polyline points="10 9 9 9 8 9"/>
             </svg>
-            <p>No data. Send a read request to view registers.</p>
+            <p>No data. Send a read request to view data.</p>
+          </div>
+
+          <!-- Write operation message -->
+          <div v-else class="empty-data">
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+            <p>Write operation selected. Use the sidebar to send write commands.</p>
           </div>
         </div>
 
@@ -839,6 +921,7 @@ function removeWriteValue(index) {
 <style scoped>
 .modbus-tab {
   display: flex;
+  width: 100%;
   height: 100%;
   overflow: hidden;
 }
@@ -856,6 +939,9 @@ function removeWriteValue(index) {
 
 .main-area {
   flex: 1;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -864,9 +950,11 @@ function removeWriteValue(index) {
 
 .content-wrapper {
   flex: 1;
+  height: 100%;
   display: flex;
   gap: 8px;
   overflow: hidden;
+  min-height: 0;
 }
 
 /* Mode Selector */
@@ -1123,13 +1211,19 @@ function removeWriteValue(index) {
   color: var(--success);
 }
 
-/* Send Button */
-.btn-send {
+/* Request Buttons */
+.request-buttons {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.btn-request {
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 5px;
-  width: 100%;
   padding: 7px;
   border: none;
   border-radius: var(--radius-sm);
@@ -1138,12 +1232,27 @@ function removeWriteValue(index) {
   font-weight: 500;
   font-size: 12px;
   cursor: pointer;
-  margin-top: 6px;
 }
 
-.btn-send:disabled {
+.btn-request:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+}
+
+.btn-request.auto {
+  background: var(--success);
+}
+
+.btn-request.auto:hover:not(:disabled) {
+  background: #059669;
+}
+
+.btn-request.auto.active {
+  background: var(--danger);
+}
+
+.btn-request.auto.active:hover {
+  background: #dc2626;
 }
 
 .spinner {
@@ -1270,54 +1379,12 @@ function removeWriteValue(index) {
   transform: translateX(12px);
 }
 
-/* Polling */
-.badge {
-  font-size: 9px;
-  padding: 1px 5px;
-  border-radius: 8px;
-  margin-left: auto;
-}
-
-.badge.polling {
-  background: var(--success);
-  color: white;
-}
-
-.polling-buttons {
-  display: flex;
-  gap: 6px;
-  margin-top: 6px;
-}
-
-.btn-start-poll, .btn-stop-poll {
-  flex: 1;
-  padding: 5px;
-  border: none;
-  border-radius: var(--radius-sm);
-  font-size: 11px;
-  font-weight: 500;
-  cursor: pointer;
-}
-
-.btn-start-poll {
-  background: var(--success);
-  color: white;
-}
-
-.btn-stop-poll {
-  background: var(--danger);
-  color: white;
-}
-
-.btn-start-poll:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
 
 /* Data Section */
 .data-section {
   flex: 0 0 auto;
   width: 42%;
+  height: 100%;
   min-width: 340px;
   max-width: 450px;
   display: flex;
@@ -1358,6 +1425,14 @@ function removeWriteValue(index) {
   margin-left: auto;
   font-size: 11px;
   color: var(--text-secondary);
+}
+
+.format-selector .dropdown-item.mini {
+  min-width: 80px;
+}
+
+.format-selector .dropdown-item.mini .dropdown-trigger {
+  justify-content: space-between;
 }
 
 .btn-clear-data, .btn-clear-log {
@@ -1464,9 +1539,11 @@ function removeWriteValue(index) {
 /* Log Section */
 .log-section {
   flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);

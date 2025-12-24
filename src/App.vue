@@ -979,8 +979,8 @@ onMounted(async () => {
     console.warn('Could not set window title:', e);
   }
 
-  // Create initial tab
-  createTab();
+  // Show module selection modal on startup
+  showNewTabModal.value = true;
 
   // Refresh ports
   await refreshPorts();
@@ -1177,59 +1177,43 @@ onMounted(async () => {
     }
   });
 
-  // Modbus response listener (for single requests)
+  // Modbus response listener - only for polling, single requests are handled by component directly
   unlistenModbusResponse = await listen("modbus-response", (event) => {
-    const { connection_id, transaction_id, slave_id, function_code, success, data, coils, error_code, request_frame, response_frame, response_time_ms, timestamp } = event.payload;
-    const tab = tabStore.getModbusTabByConnectionId(connection_id);
-    if (tab) {
-      // Add to transaction log
-      const logEntry = {
-        id: transaction_id,
-        timestamp: new Date(timestamp).toLocaleTimeString(),
-        functionCode: function_code,
-        slaveId: slave_id,
-        success: success,
-        requestFrame: request_frame,
-        responseFrame: response_frame,
-        responseTime: response_time_ms,
-        errorCode: error_code,
-      };
-
-      tab.transactionLog.unshift(logEntry);
-      // Limit log entries
-      if (tab.transactionLog.length > tab.maxLogEntries) {
-        tab.transactionLog.pop();
-      }
-
-      // Update last response time
-      tab.lastResponseTime = response_time_ms;
-
-      // Update data if successful
-      if (success) {
-        if (data && data.length > 0) {
-          // Register data (FC03, FC04)
-          tab.registerData = data.map((value, index) => ({
-            address: tab.startAddress + index,
-            value: value,
-            rawHex: value.toString(16).toUpperCase().padStart(4, '0'),
-          }));
-        }
-        if (coils && coils.length > 0) {
-          // Coil data (FC01, FC02)
-          tab.coilData = coils.map((value, index) => ({
-            address: tab.startAddress + index,
-            value: value,
-          }));
-        }
-      }
-    }
+    // Note: Single request responses are handled directly in ModbusTab.vue's sendRequest()
+    // This listener is kept for potential future use (e.g., background polling responses)
   });
 
   // Modbus poll data listener
   unlistenModbusPollData = await listen("modbus-poll-data", (event) => {
-    const { connection_id, function_code, start_address, data, coils, timestamp } = event.payload;
+    console.log('modbus-poll-data event received:', event.payload);
+    const { connection_id, transaction_id, slave_id, function_code, start_address, quantity, data, coils, success, error_code, error_message, request_frame, response_frame, response_time_ms, timestamp } = event.payload;
     const tab = tabStore.getModbusTabByConnectionId(connection_id);
+    console.log('Found tab for connection_id:', connection_id, 'tab:', tab?.connectionId);
     if (tab) {
+      // Add to transaction log
+      const logEntry = {
+        id: Date.now(),
+        type: success ? 'success' : 'error',
+        timestamp: new Date(timestamp).toLocaleTimeString(),
+        functionCode: function_code,
+        slaveId: slave_id,
+        success: success,
+        requestFrame: request_frame || [],
+        responseFrame: response_frame || [],
+        responseTime: response_time_ms || 0,
+        errorCode: error_code,
+        errorMessage: error_message,
+        data: data,
+        coils: coils,
+      };
+
+      tab.transactionLog.unshift(logEntry);
+
+      // Update last response time
+      if (response_time_ms) {
+        tab.lastResponseTime = response_time_ms;
+      }
+
       // Update data based on function code
       if (data && data.length > 0) {
         tab.registerData = data.map((value, index) => ({
@@ -1239,10 +1223,17 @@ onMounted(async () => {
         }));
       }
       if (coils && coils.length > 0) {
-        tab.coilData = coils.map((value, index) => ({
+        // Slice to requested quantity (backend may return more bits from bytes)
+        const coilDataArray = coils.slice(0, quantity).map((value, index) => ({
           address: start_address + index,
           value: value,
         }));
+        // FC01 = Coils, FC02 = Discrete Inputs
+        if (function_code === 1) {
+          tab.coilData = coilDataArray;
+        } else if (function_code === 2) {
+          tab.discreteInputData = coilDataArray;
+        }
       }
     }
   });
@@ -1286,10 +1277,6 @@ onMounted(async () => {
       };
 
       tab.requestLog.unshift(logEntry);
-      // Limit log entries
-      if (tab.requestLog.length > tab.maxLogEntries) {
-        tab.requestLog.pop();
-      }
 
       // Update request count and time
       tab.requestCount = (tab.requestCount || 0) + 1;
@@ -1576,6 +1563,7 @@ onUnmounted(async () => {
     <!-- New Tab Modal -->
     <NewTabModal
       :visible="showNewTabModal"
+      :can-cancel="tabs.size > 0"
       @select="handleNewTabSelect"
       @cancel="cancelNewTabModal"
     />

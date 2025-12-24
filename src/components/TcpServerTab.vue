@@ -669,7 +669,7 @@ defineExpose({ addTerminalEntry });
 }
 
 .card-header svg {
-  color: #8b5cf6;
+  color: var(--accent-primary);
   width: 14px;
   height: 14px;
 }
@@ -727,8 +727,8 @@ defineExpose({ addTerminalEntry });
 
 .port-input-inline:focus {
   outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
 }
 
 .port-input-inline:disabled {
@@ -750,8 +750,8 @@ defineExpose({ addTerminalEntry });
 
 .field-input:focus {
   outline: none;
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
 }
 
 .field-input:disabled {
@@ -786,12 +786,12 @@ defineExpose({ addTerminalEntry });
 }
 
 .dropdown-item.mini .dropdown-trigger:hover {
-  border-color: #8b5cf6;
+  border-color: var(--accent-primary);
 }
 
 .dropdown-item.mini.open .dropdown-trigger {
-  border-color: #8b5cf6;
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
 }
 
 .dropdown-item.mini.disabled {
@@ -857,13 +857,13 @@ defineExpose({ addTerminalEntry });
 }
 
 .dropdown-option.selected {
-  background: rgba(139, 92, 246, 0.1);
-  color: #8b5cf6;
+  background: rgba(14, 165, 233, 0.1);
+  color: var(--accent-primary);
   font-weight: 600;
 }
 
 .dropdown-option svg {
-  color: #8b5cf6;
+  color: var(--accent-primary);
 }
 
 /* Connect Button */
@@ -877,18 +877,18 @@ defineExpose({ addTerminalEntry });
   font-size: 0.8rem;
   font-weight: 600;
   font-family: var(--font-sans);
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  background: linear-gradient(135deg, var(--accent-primary), #0284c7);
   border: none;
   border-radius: var(--radius-lg);
   color: white;
   cursor: pointer;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 14px rgb(139 92 246 / 0.35);
+  box-shadow: 0 4px 14px rgba(14, 165, 233, 0.35);
 }
 
 .btn-connect:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgb(139 92 246 / 0.4);
+  box-shadow: 0 6px 20px rgba(14, 165, 233, 0.4);
 }
 
 .btn-connect:disabled {
@@ -915,7 +915,7 @@ defineExpose({ addTerminalEntry });
 .server-controls .toggle-switch.mini {
   flex-shrink: 0;
   padding: 8px 10px;
-  background: var(--bg-tertiary);
+  background: transparent;
   border-radius: var(--radius-md);
 }
 
@@ -944,7 +944,7 @@ defineExpose({ addTerminalEntry });
 
 /* Clients Card */
 .clients-card {
-  border-color: #8b5cf6;
+  border-color: var(--accent-primary);
   flex: 1;
   min-height: 0;
   display: flex;
@@ -958,7 +958,7 @@ defineExpose({ addTerminalEntry });
 .client-count-badge {
   margin-left: auto;
   padding: 2px 8px;
-  background: #8b5cf6;
+  background: var(--accent-primary);
   color: white;
   border-radius: 10px;
   font-size: 0.6rem;
@@ -1127,7 +1127,8 @@ defineExpose({ addTerminalEntry });
   position: relative;
   width: 36px;
   height: 20px;
-  background: var(--bg-tertiary);
+  background: transparent;
+  border: 1px solid var(--border-color);
   border-radius: 50px;
   transition: all 0.3s ease;
 }
@@ -1137,20 +1138,21 @@ defineExpose({ addTerminalEntry });
   position: absolute;
   top: 2px;
   left: 2px;
-  width: 16px;
-  height: 16px;
-  background: white;
+  width: 14px;
+  height: 14px;
+  background: var(--text-tertiary);
   border-radius: 50%;
-  box-shadow: var(--shadow-sm);
   transition: all 0.3s ease;
 }
 
 .toggle-switch input:checked + .toggle-slider {
   background: var(--accent-primary);
+  border-color: var(--accent-primary);
 }
 
 .toggle-switch input:checked + .toggle-slider::before {
   transform: translateX(16px);
+  background: white;
 }
 
 .toggle-label {
@@ -1169,8 +1171,10 @@ defineExpose({ addTerminalEntry });
 }
 
 .toggle-switch.compact .toggle-slider::before {
-  width: 10px;
-  height: 10px;
+  width: 8px;
+  height: 8px;
+  top: 2px;
+  left: 2px;
 }
 
 .toggle-switch.compact input:checked + .toggle-slider::before {
@@ -1353,7 +1357,7 @@ defineExpose({ addTerminalEntry });
 .terminal-title svg {
   width: 12px;
   height: 12px;
-  color: #8b5cf6;
+  color: var(--accent-primary);
 }
 
 .terminal-stats {
@@ -1381,7 +1385,7 @@ defineExpose({ addTerminalEntry });
 }
 
 .stat-item.rx {
-  background: #8b5cf6;
+  background: var(--accent-primary);
   color: white;
 }
 
@@ -1438,7 +1442,7 @@ defineExpose({ addTerminalEntry });
 }
 
 .terminal-line.rx {
-  border-left-color: #8b5cf6;
+  border-left-color: var(--accent-primary);
 }
 
 .terminal-line .timestamp {
@@ -1463,7 +1467,7 @@ defineExpose({ addTerminalEntry });
 }
 
 .direction-badge.rx {
-  background: #8b5cf6;
+  background: var(--accent-primary);
   color: white;
 }
 
@@ -1495,7 +1499,7 @@ defineExpose({ addTerminalEntry });
 
 .terminal-empty svg {
   opacity: 0.4;
-  color: #8b5cf6;
+  color: var(--accent-primary);
 }
 
 .terminal-empty p {
@@ -1536,9 +1540,9 @@ defineExpose({ addTerminalEntry });
 
 .input-wrapper input:focus {
   outline: none;
-  border-color: var(--border-focus);
+  border-color: var(--accent-primary);
   background: var(--bg-secondary);
-  box-shadow: 0 0 0 2px rgba(139, 92, 246, 0.2);
+  box-shadow: 0 0 0 2px rgba(14, 165, 233, 0.2);
 }
 
 .input-wrapper input:disabled {
@@ -1581,18 +1585,18 @@ defineExpose({ addTerminalEntry });
   font-size: 0.75rem;
   font-weight: 600;
   font-family: var(--font-sans);
-  background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+  background: linear-gradient(135deg, var(--accent-primary), #0284c7);
   border: none;
   border-radius: var(--radius-md);
   color: white;
   cursor: pointer;
   transition: all 0.2s ease;
-  box-shadow: 0 2px 8px rgb(139 92 246 / 0.3);
+  box-shadow: 0 2px 8px rgba(14, 165, 233, 0.3);
 }
 
 .btn-send:hover:not(:disabled) {
   transform: translateY(-2px);
-  box-shadow: 0 6px 20px rgb(139 92 246 / 0.4);
+  box-shadow: 0 6px 20px rgba(14, 165, 233, 0.4);
 }
 
 .btn-send:disabled {

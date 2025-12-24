@@ -28,10 +28,15 @@ const isLoading = ref(false);
 const editingCell = ref(null);
 const editValue = ref('');
 
-// Auto-increment state
+// Auto-increment state (for registers)
 const autoIncrementAddresses = ref(new Set()); // Set of addresses being auto-incremented
 const autoIncrementTimers = ref(new Map()); // Map of address -> timer ID
 const autoIncrementInterval = 500; // ms between increments
+
+// Auto-toggle state (for coils/discrete inputs)
+const autoToggleAddresses = ref(new Set()); // Set of addresses being auto-toggled
+const autoToggleTimers = ref(new Map()); // Map of address -> timer ID
+const autoToggleInterval = 1000; // ms between toggles
 
 // Constants
 const MAX_LOG_ENTRIES = 100;
@@ -164,10 +169,43 @@ function closeDropdowns() {
 // Connection handlers
 async function toggleConnection() {
   if (props.tabState.isConnected) {
+    // Stop all auto operations
+    stopAllAutoIncrements();
+    stopAllAutoToggles();
+
+    // Reset data to defaults
+    props.tabState.coilsData = [];
+    props.tabState.discreteInputsData = [];
+    props.tabState.holdingRegistersData = [];
+    props.tabState.inputRegistersData = [];
+    props.tabState.requestLog = [];
+    props.tabState.requestCount = 0;
+
     emit('disconnect', props.tabId);
   } else {
+    // Generate initial data based on viewStartAddress and viewQuantity
+    initializeData();
     emit('connect', props.tabId);
   }
+}
+
+// Initialize data arrays with default values
+function initializeData() {
+  const start = props.tabState.viewStartAddress || 0;
+  const qty = props.tabState.viewQuantity || 100;
+  const end = start + qty;
+
+  // Initialize coils (false by default)
+  props.tabState.coilsData = new Array(end).fill(false);
+
+  // Initialize discrete inputs (false by default)
+  props.tabState.discreteInputsData = new Array(end).fill(false);
+
+  // Initialize holding registers (0 by default)
+  props.tabState.holdingRegistersData = new Array(end).fill(0);
+
+  // Initialize input registers (0 by default)
+  props.tabState.inputRegistersData = new Array(end).fill(0);
 }
 
 // Data editing
@@ -213,22 +251,111 @@ async function toggleDiscreteInput(address) {
   }
 }
 
+// Auto toggle for coils/discrete inputs
+function isAutoToggling(address, dataType) {
+  const key = getToggleKey(address, dataType);
+  return autoToggleAddresses.value.has(key);
+}
+
+function getToggleKey(address, dataType) {
+  return `${dataType}-${address}`;
+}
+
+function toggleAutoToggle(address, dataType) {
+  if (!props.tabState.isConnected) return;
+
+  const key = getToggleKey(address, dataType);
+  if (autoToggleAddresses.value.has(key)) {
+    stopAutoToggle(address, dataType);
+  } else {
+    startAutoToggle(address, dataType);
+  }
+}
+
+function startAutoToggle(address, dataType) {
+  const key = getToggleKey(address, dataType);
+  autoToggleAddresses.value.add(key);
+  autoToggleAddresses.value = new Set(autoToggleAddresses.value);
+
+  const timer = setInterval(async () => {
+    if (!props.tabState.isConnected) {
+      stopAutoToggle(address, dataType);
+      return;
+    }
+
+    try {
+      const connectionId = props.tabState.slaveConnectionId || props.tabState.connectionId;
+
+      if (dataType === 'coils') {
+        const currentValue = props.tabState.coilsData[address] || false;
+        const newValue = !currentValue;
+        await invoke('modbus_slave_set_coil', {
+          connectionId,
+          address,
+          value: newValue,
+        });
+        props.tabState.coilsData[address] = newValue;
+      } else if (dataType === 'discrete_inputs') {
+        const currentValue = props.tabState.discreteInputsData[address] || false;
+        const newValue = !currentValue;
+        await invoke('modbus_slave_set_discrete_input', {
+          connectionId,
+          address,
+          value: newValue,
+        });
+        props.tabState.discreteInputsData[address] = newValue;
+      }
+    } catch (error) {
+      console.error('Auto toggle error:', error);
+      stopAutoToggle(address, dataType);
+    }
+  }, autoToggleInterval);
+
+  autoToggleTimers.value.set(key, timer);
+}
+
+function stopAutoToggle(address, dataType) {
+  const key = getToggleKey(address, dataType);
+  const timer = autoToggleTimers.value.get(key);
+  if (timer) {
+    clearInterval(timer);
+    autoToggleTimers.value.delete(key);
+  }
+  autoToggleAddresses.value.delete(key);
+  autoToggleAddresses.value = new Set(autoToggleAddresses.value);
+}
+
+function stopAllAutoToggles() {
+  for (const [, timer] of autoToggleTimers.value) {
+    clearInterval(timer);
+  }
+  autoToggleTimers.value.clear();
+  autoToggleAddresses.value.clear();
+}
+
 function startEdit(address, currentValue) {
   if (!props.tabState.isConnected) return;
   // Stop auto-increment if running for this address
-  if (isAutoIncrementing(address)) {
-    stopAutoIncrement(address);
+  if (isAutoIncrementing(address, currentDataTab.value)) {
+    stopAutoIncrement(address, currentDataTab.value);
   }
   editingCell.value = address;
   editValue.value = currentValue.toString();
 }
 
 async function saveEdit(address) {
+  // Prevent double-save (Enter + blur)
+  if (editingCell.value === null) return;
   if (!props.tabState.isConnected) return;
 
   try {
     const connectionId = props.tabState.slaveConnectionId || props.tabState.connectionId;
-    const value = parseInt(editValue.value) || 0;
+    const value = parseInt(editValue.value);
+    // If invalid input, cancel edit instead of saving 0
+    if (isNaN(value)) {
+      cancelEdit();
+      return;
+    }
     const clampedValue = Math.max(0, Math.min(65535, value));
 
     if (currentDataTab.value === 'holding_registers') {
@@ -291,33 +418,41 @@ async function incrementRegister(address) {
   }
 }
 
+// Get unique key for auto-increment
+function getIncrementKey(address, dataType) {
+  return `${dataType}-${address}`;
+}
+
 // Check if address is auto-incrementing
-function isAutoIncrementing(address) {
-  return autoIncrementAddresses.value.has(address);
+function isAutoIncrementing(address, dataType) {
+  const key = getIncrementKey(address, dataType);
+  return autoIncrementAddresses.value.has(key);
 }
 
 // Toggle auto-increment for an address
-function toggleAutoIncrement(address) {
+function toggleAutoIncrement(address, dataType) {
   if (!props.tabState.isConnected) return;
 
-  if (autoIncrementAddresses.value.has(address)) {
+  const key = getIncrementKey(address, dataType);
+  if (autoIncrementAddresses.value.has(key)) {
     // Stop auto-increment
-    stopAutoIncrement(address);
+    stopAutoIncrement(address, dataType);
   } else {
     // Start auto-increment
-    startAutoIncrement(address);
+    startAutoIncrement(address, dataType);
   }
 }
 
 // Start auto-increment for an address
-function startAutoIncrement(address) {
-  autoIncrementAddresses.value.add(address);
+function startAutoIncrement(address, dataType) {
+  const key = getIncrementKey(address, dataType);
+  autoIncrementAddresses.value.add(key);
   // Force reactivity update
   autoIncrementAddresses.value = new Set(autoIncrementAddresses.value);
 
   const timer = setInterval(async () => {
     if (!props.tabState.isConnected) {
-      stopAutoIncrement(address);
+      stopAutoIncrement(address, dataType);
       return;
     }
 
@@ -325,7 +460,7 @@ function startAutoIncrement(address) {
       const connectionId = props.tabState.slaveConnectionId || props.tabState.connectionId;
       let currentValue, newValue;
 
-      if (currentDataTab.value === 'holding_registers') {
+      if (dataType === 'holding_registers') {
         currentValue = props.tabState.holdingRegistersData[address] || 0;
         newValue = (currentValue + 1) % 65536;
         await invoke('modbus_slave_set_register', {
@@ -334,7 +469,7 @@ function startAutoIncrement(address) {
           value: newValue,
         });
         props.tabState.holdingRegistersData[address] = newValue;
-      } else if (currentDataTab.value === 'input_registers') {
+      } else if (dataType === 'input_registers') {
         currentValue = props.tabState.inputRegistersData[address] || 0;
         newValue = (currentValue + 1) % 65536;
         await invoke('modbus_slave_set_input_register', {
@@ -346,21 +481,22 @@ function startAutoIncrement(address) {
       }
     } catch (error) {
       console.error('Auto increment error:', error);
-      stopAutoIncrement(address);
+      stopAutoIncrement(address, dataType);
     }
   }, autoIncrementInterval);
 
-  autoIncrementTimers.value.set(address, timer);
+  autoIncrementTimers.value.set(key, timer);
 }
 
 // Stop auto-increment for an address
-function stopAutoIncrement(address) {
-  const timer = autoIncrementTimers.value.get(address);
+function stopAutoIncrement(address, dataType) {
+  const key = getIncrementKey(address, dataType);
+  const timer = autoIncrementTimers.value.get(key);
   if (timer) {
     clearInterval(timer);
-    autoIncrementTimers.value.delete(address);
+    autoIncrementTimers.value.delete(key);
   }
-  autoIncrementAddresses.value.delete(address);
+  autoIncrementAddresses.value.delete(key);
   // Force reactivity update
   autoIncrementAddresses.value = new Set(autoIncrementAddresses.value);
 }
@@ -486,13 +622,17 @@ watch(() => props.tabState.activeDataTab, () => {
 });
 
 // Auto scroll log when new entries are added
-watch(() => props.tabState.requestLog?.length, () => {
-  nextTick(() => {
-    if (requestLogRef.value) {
-      requestLogRef.value.scrollTop = requestLogRef.value.scrollHeight;
-    }
-  });
-});
+watch(
+  () => props.tabState.requestLog?.length,
+  () => {
+    nextTick(() => {
+      if (requestLogRef.value) {
+        requestLogRef.value.scrollTop = requestLogRef.value.scrollHeight;
+      }
+    });
+  },
+  { flush: 'post' }
+);
 
 // Initialize data arrays
 onMounted(() => {
@@ -666,7 +806,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Slave ID -->
-        <div class="field-row">
+        <div class="field-row" style="margin-top: 8px;">
           <label>Slave ID</label>
           <input
             type="number"
@@ -682,13 +822,9 @@ onUnmounted(() => {
       <div v-else class="config-card">
         <div class="card-header">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <rect x="2" y="3" width="20" height="6" rx="1"/>
-            <rect x="2" y="15" width="20" height="6" rx="1"/>
-            <circle cx="6" cy="6" r="1" fill="currentColor"/>
-            <circle cx="6" cy="18" r="1" fill="currentColor"/>
-            <path d="M12 9v6"/>
+            <path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9m-9 9a9 9 0 0 1 9-9"/>
           </svg>
-          <span>TCP Server Configuration</span>
+          <span>TCP Configuration</span>
         </div>
 
         <div class="field-row">
@@ -702,13 +838,14 @@ onUnmounted(() => {
         </div>
 
         <div class="field-row">
-          <label>Listen Port</label>
+          <label>Port</label>
           <input
             type="number"
             v-model.number="tabState.listenPort"
             :disabled="tabState.isConnected"
             min="1"
             max="65535"
+            placeholder="502"
           />
         </div>
 
@@ -942,12 +1079,30 @@ onUnmounted(() => {
                 </td>
                 <td v-if="isEditable || currentDataTab === 'discrete_inputs'" class="action">
                   <button
-                    class="btn-toggle"
+                    class="btn-auto"
+                    :class="{ active: isAutoToggling(tabState.viewStartAddress + index, currentDataTab) }"
+                    @click="toggleAutoToggle(tabState.viewStartAddress + index, currentDataTab)"
+                    :disabled="!tabState.isConnected"
+                    :title="isAutoToggling(tabState.viewStartAddress + index, currentDataTab) ? 'Stop' : 'Auto'"
+                  >
+                    <svg v-if="!isAutoToggling(tabState.viewStartAddress + index, currentDataTab)" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                      <polygon points="5 3 19 12 5 21 5 3"/>
+                    </svg>
+                    <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                      <rect x="6" y="4" width="4" height="16"/>
+                      <rect x="14" y="4" width="4" height="16"/>
+                    </svg>
+                  </button>
+                  <button
+                    class="btn-switch"
                     :class="{ on: value }"
                     @click="currentDataTab === 'coils' ? toggleCoil(tabState.viewStartAddress + index) : toggleDiscreteInput(tabState.viewStartAddress + index)"
                     :disabled="!tabState.isConnected"
+                    title="Toggle"
                   >
-                    Toggle
+                    <span class="switch-track">
+                      <span class="switch-thumb"></span>
+                    </span>
                   </button>
                 </td>
               </tr>
@@ -1000,12 +1155,12 @@ onUnmounted(() => {
                 <td v-if="isEditable || currentDataTab === 'input_registers'" class="action">
                   <button
                     class="btn-auto"
-                    :class="{ active: isAutoIncrementing(tabState.viewStartAddress + index) }"
-                    @click="toggleAutoIncrement(tabState.viewStartAddress + index)"
+                    :class="{ active: isAutoIncrementing(tabState.viewStartAddress + index, currentDataTab) }"
+                    @click="toggleAutoIncrement(tabState.viewStartAddress + index, currentDataTab)"
                     :disabled="!tabState.isConnected"
-                    :title="isAutoIncrementing(tabState.viewStartAddress + index) ? 'Stop' : 'Auto'"
+                    :title="isAutoIncrementing(tabState.viewStartAddress + index, currentDataTab) ? 'Stop' : 'Auto'"
                   >
-                    <svg v-if="!isAutoIncrementing(tabState.viewStartAddress + index)" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                    <svg v-if="!isAutoIncrementing(tabState.viewStartAddress + index, currentDataTab)" width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
                       <polygon points="5 3 19 12 5 21 5 3"/>
                     </svg>
                     <svg v-else width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
@@ -1019,7 +1174,10 @@ onUnmounted(() => {
                     :disabled="!tabState.isConnected"
                     title="Increment +1"
                   >
-                    +1
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                      <rect x="10" y="4" width="4" height="16"/>
+                      <rect x="4" y="10" width="16" height="4"/>
+                    </svg>
                   </button>
                 </td>
               </tr>
@@ -1034,13 +1192,13 @@ onUnmounted(() => {
             <p>No data to display</p>
           </div>
         </div>
-      </div>
+        </div><!-- End data-section -->
 
-      <!-- Request Log -->
-      <div class="log-section">
+        <!-- Request Log -->
+        <div class="log-section">
         <div class="section-header">
           <h3>Request Log</h3>
-          <span class="log-count">{{ tabState.requestLog?.length || 0 }} entries</span>
+          <span class="log-count">{{ tabState.requestCount || 0 }} entries</span>
           <button class="btn-clear-log" @click="clearLog" title="Clear log">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <polyline points="3 6 5 6 21 6"/>
@@ -1093,23 +1251,27 @@ onUnmounted(() => {
 <style scoped>
 .modbus-slave-tab {
   display: flex;
+  width: 100%;
   height: 100%;
   overflow: hidden;
 }
 
 .sidebar {
-  width: 220px;
-  min-width: 220px;
-  padding: 6px;
+  width: 280px;
+  min-width: 280px;
+  padding: 8px;
   overflow-y: auto;
   border-right: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 6px;
 }
 
 .main-area {
   flex: 1;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -1118,9 +1280,11 @@ onUnmounted(() => {
 
 .content-wrapper {
   flex: 1;
+  height: 100%;
   display: flex;
   gap: 8px;
   overflow: hidden;
+  min-height: 0;
 }
 
 /* Mode Selector */
@@ -1134,19 +1298,19 @@ onUnmounted(() => {
 
 .mode-selector button {
   flex: 1;
-  padding: 4px 8px;
+  padding: 5px 12px;
   border: none;
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text-secondary);
   font-weight: 500;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .mode-selector button.active {
-  background: #6366f1;
+  background: var(--accent-primary);
   color: white;
 }
 
@@ -1160,7 +1324,7 @@ onUnmounted(() => {
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  padding: 6px;
+  padding: 8px;
 }
 
 .config-card.disabled {
@@ -1171,22 +1335,22 @@ onUnmounted(() => {
 .card-header {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 6px;
+  gap: 6px;
+  margin-bottom: 8px;
   font-weight: 600;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--text-primary);
 }
 
 .card-header svg {
-  color: #6366f1;
-  width: 12px;
-  height: 12px;
+  color: var(--accent-primary);
+  width: 14px;
+  height: 14px;
 }
 
 .card-header .badge {
   margin-left: auto;
-  background: #6366f1;
+  background: var(--accent-primary);
   color: white;
   padding: 1px 6px;
   border-radius: 8px;
@@ -1197,28 +1361,106 @@ onUnmounted(() => {
 .field-row {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .field-row label {
-  min-width: 60px;
-  font-size: 10px;
+  min-width: 70px;
+  font-size: 11px;
   color: var(--text-secondary);
 }
 
 .field-row input {
   flex: 1;
-  padding: 3px 6px;
+  padding: 4px 8px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: 12px;
   background: var(--bg-primary);
 }
 
 .field-row input:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.field-row-inline {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.field-row-3cols {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.field-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 10px;
+}
+
+.field-col .field-input {
+  width: 100%;
+  text-align: right;
+}
+
+.field-label-float {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.field-input {
+  padding: 4px 8px;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 12px;
+  font-family: var(--font-mono);
+}
+
+.field-input.host-input {
+  flex: 2;
+  min-width: 0;
+}
+
+.field-input.port-input {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.field-label-inline {
+  flex: 2;
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-align: right;
+  padding-right: 8px;
+}
+
+.field-input:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+.field-input:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.port-separator {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  flex-shrink: 0;
 }
 
 /* Config Row */
@@ -1248,7 +1490,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 4px 6px;
+  padding: 5px 8px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -1257,24 +1499,24 @@ onUnmounted(() => {
 }
 
 .dropdown-item.mini .dropdown-trigger {
-  padding: 3px 5px;
-  font-size: 10px;
+  padding: 4px 6px;
+  font-size: 11px;
 }
 
 .dropdown-trigger:hover {
-  border-color: #6366f1;
+  border-color: var(--accent-primary);
 }
 
 .dropdown-label {
   display: flex;
   align-items: center;
-  gap: 4px;
-  font-size: 11px;
+  gap: 6px;
+  font-size: 12px;
 }
 
 .dropdown-label svg {
-  width: 11px;
-  height: 11px;
+  width: 12px;
+  height: 12px;
 }
 
 .dropdown-menu {
@@ -1304,7 +1546,7 @@ onUnmounted(() => {
 }
 
 .dropdown-option.selected {
-  background: #6366f1;
+  background: var(--accent-primary);
   color: white;
 }
 
@@ -1336,27 +1578,27 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 5px;
+  gap: 6px;
   width: 100%;
-  padding: 6px;
+  padding: 8px;
   border: none;
   border-radius: var(--radius-sm);
-  background: linear-gradient(135deg, #6366f1, #4f46e5);
+  background: linear-gradient(135deg, var(--accent-primary), #0284c7);
   color: white;
   font-weight: 600;
-  font-size: 11px;
+  font-size: 12px;
   cursor: pointer;
   transition: all 0.2s;
 }
 
 .btn-connect svg {
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
 }
 
 .btn-connect:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 3px 10px rgba(99, 102, 241, 0.3);
+  box-shadow: 0 3px 10px rgba(14, 165, 233, 0.3);
 }
 
 .btn-connect.connected {
@@ -1374,6 +1616,7 @@ onUnmounted(() => {
   border-radius: var(--radius-sm);
   font-size: 11px;
   text-align: center;
+  font-family: var(--font-mono);
 }
 
 .status-message.error {
@@ -1382,8 +1625,9 @@ onUnmounted(() => {
 }
 
 .status-message.connected {
-  background: rgba(16, 185, 129, 0.1);
-  color: var(--success);
+  background: rgba(16, 185, 129, 0.08);
+  color: #059669;
+  font-weight: 500;
 }
 
 /* Clients List */
@@ -1424,50 +1668,50 @@ onUnmounted(() => {
 .stats-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  margin-bottom: 4px;
+  gap: 6px;
+  margin-bottom: 6px;
 }
 
 .stat-item {
   background: var(--bg-primary);
-  padding: 3px 4px;
+  padding: 6px 8px;
   border-radius: var(--radius-sm);
   text-align: center;
 }
 
 .stat-label {
   display: block;
-  font-size: 8px;
+  font-size: 10px;
   color: var(--text-tertiary);
-  margin-bottom: 1px;
+  margin-bottom: 2px;
 }
 
 .stat-value {
   display: block;
-  font-size: 11px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .stats-actions {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .btn-stats {
   flex: 1;
-  padding: 3px;
+  padding: 5px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: 9px;
+  font-size: 11px;
   cursor: pointer;
 }
 
 .btn-stats:hover {
-  border-color: #6366f1;
-  color: #6366f1;
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 
 .btn-stats.danger:hover {
@@ -1478,7 +1722,7 @@ onUnmounted(() => {
 /* Persistence */
 .persistence-buttons {
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .btn-persistence {
@@ -1486,25 +1730,26 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 3px;
-  padding: 4px;
+  gap: 4px;
+  padding: 5px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--text-secondary);
-  font-size: 10px;
+  font-size: 11px;
   cursor: pointer;
 }
 
 .btn-persistence:hover {
-  border-color: #6366f1;
-  color: #6366f1;
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 
 /* Data Section */
 .data-section {
   flex: 0 0 auto;
   width: 42%;
+  height: 100%;
   min-width: 340px;
   max-width: 450px;
   display: flex;
@@ -1520,16 +1765,17 @@ onUnmounted(() => {
   display: flex;
   background: var(--bg-tertiary);
   border-bottom: 1px solid var(--border-color);
-  padding: 4px 4px 0;
-  gap: 2px;
+  padding: 5px 5px 0;
+  gap: 3px;
 }
 
 .data-tab {
-  padding: 6px 12px;
+  flex: 1;
+  padding: 6px 8px;
   border: none;
   border-radius: var(--radius-sm) var(--radius-sm) 0 0;
   background: transparent;
-  color: var(--text-secondary);
+  color: var(--text-primary);
   font-size: 11px;
   cursor: pointer;
   transition: all 0.2s;
@@ -1545,22 +1791,24 @@ onUnmounted(() => {
 
 .data-tab.active {
   background: var(--bg-secondary);
-  color: #6366f1;
+  color: var(--accent-primary);
   font-weight: 600;
 }
 
 .tab-label {
-  font-weight: 500;
+  font-weight: 600;
+  font-size: 10px;
 }
 
 .tab-fc {
   font-size: 9px;
-  color: var(--text-tertiary);
+  font-weight: 500;
+  color: var(--text-secondary);
 }
 
 .data-tab.active .tab-fc {
-  color: #6366f1;
-  opacity: 0.7;
+  color: var(--accent-primary);
+  opacity: 0.8;
 }
 
 .section-header {
@@ -1569,10 +1817,11 @@ onUnmounted(() => {
   gap: 8px;
   padding: 6px 10px;
   border-bottom: 1px solid var(--border-color);
+  background: var(--bg-tertiary);
 }
 
 .section-header h3 {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 600;
   margin: 0;
 }
@@ -1611,6 +1860,14 @@ onUnmounted(() => {
   color: var(--text-secondary);
 }
 
+.format-selector .dropdown-item.mini {
+  min-width: 80px;
+}
+
+.format-selector .dropdown-item.mini .dropdown-trigger {
+  justify-content: space-between;
+}
+
 .btn-refresh {
   padding: 3px;
   border: none;
@@ -1625,7 +1882,7 @@ onUnmounted(() => {
 
 .btn-refresh:hover {
   background: var(--bg-tertiary);
-  color: #6366f1;
+  color: var(--accent-primary);
 }
 
 .data-table-container {
@@ -1658,11 +1915,12 @@ onUnmounted(() => {
 
 .data-table .addr {
   color: var(--text-tertiary);
-  width: 80px;
+  width: 25%;
 }
 
 .data-table .value {
   font-weight: 500;
+  width: 25%;
 }
 
 .value-display {
@@ -1688,16 +1946,21 @@ tr:hover .btn-edit-inline {
 }
 
 .btn-edit-inline:hover {
-  color: #6366f1;
+  color: var(--accent-primary);
 }
 
 .data-table .hex {
-  color: #6366f1;
-  width: 80px;
+  color: var(--accent-primary);
+  width: 25%;
 }
 
 .data-table .action {
-  width: 70px;
+  width: 25%;
+  vertical-align: middle;
+}
+
+.data-table .action button {
+  vertical-align: middle;
 }
 
 .coil-on {
@@ -1708,53 +1971,84 @@ tr:hover .btn-edit-inline {
   color: var(--text-tertiary) !important;
 }
 
-.btn-toggle {
-  padding: 2px 8px;
-  border: 1px solid var(--border-color);
-  border-radius: var(--radius-sm);
-  background: var(--bg-primary);
-  color: var(--text-secondary);
-  font-size: 10px;
+.btn-switch {
+  width: 32px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  background: transparent;
   cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: 6px;
+  vertical-align: middle;
 }
 
-.btn-toggle:hover:not(:disabled) {
-  border-color: #6366f1;
-  color: #6366f1;
-}
-
-.btn-toggle.on {
-  background: var(--success);
-  border-color: var(--success);
-  color: white;
-}
-
-.btn-toggle:disabled {
+.btn-switch:disabled {
   opacity: 0.5;
   cursor: not-allowed;
 }
 
+.switch-track {
+  width: 32px;
+  height: 18px;
+  background: var(--border-color);
+  border-radius: 9px;
+  position: relative;
+  transition: background 0.2s;
+}
+
+.btn-switch.on .switch-track {
+  background: var(--success);
+}
+
+.switch-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 12px;
+  height: 12px;
+  background: white;
+  border-radius: 50%;
+  transition: left 0.2s;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+}
+
+.btn-switch.on .switch-thumb {
+  left: 17px;
+}
+
+.btn-switch:hover:not(:disabled) .switch-track {
+  background: var(--text-tertiary);
+}
+
+.btn-switch.on:hover:not(:disabled) .switch-track {
+  background: #059669;
+}
+
 .btn-auto {
-  padding: 2px 4px;
+  width: 22px;
+  height: 18px;
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
   background: var(--bg-primary);
   color: var(--text-secondary);
   cursor: pointer;
-  margin-right: 2px;
+  margin-right: 6px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
 .btn-auto:hover:not(:disabled) {
-  border-color: #f59e0b;
-  color: #f59e0b;
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 
 .btn-auto.active {
-  background: #f59e0b;
-  border-color: #f59e0b;
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
   color: white;
   animation: pulse 1s infinite;
 }
@@ -1784,8 +2078,8 @@ tr:hover .btn-edit-inline {
 }
 
 .btn-edit:hover:not(:disabled) {
-  border-color: #6366f1;
-  color: #6366f1;
+  border-color: var(--accent-primary);
+  color: var(--accent-primary);
 }
 
 .btn-edit:disabled {
@@ -1794,15 +2088,17 @@ tr:hover .btn-edit-inline {
 }
 
 .btn-increment {
-  padding: 2px 6px;
+  width: 22px;
+  height: 18px;
   border: 1px solid var(--success);
   border-radius: var(--radius-sm);
   background: var(--success);
   color: white;
-  font-size: 10px;
-  font-weight: 600;
   cursor: pointer;
   margin-right: 2px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .btn-increment:hover:not(:disabled) {
@@ -1833,7 +2129,7 @@ tr:hover .btn-edit-inline {
 .edit-input {
   width: 80px;
   padding: 2px 4px;
-  border: 1px solid #6366f1;
+  border: 1px solid var(--accent-primary);
   border-radius: var(--radius-sm);
   font-size: 11px;
   font-family: var(--font-mono);
@@ -1861,9 +2157,11 @@ tr:hover .btn-edit-inline {
 /* Log Section */
 .log-section {
   flex: 1;
+  height: 100%;
   display: flex;
   flex-direction: column;
   min-width: 0;
+  min-height: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -1933,7 +2231,7 @@ tr:hover .btn-edit-inline {
   font-size: 9px;
   font-weight: 600;
   padding: 0px 3px;
-  background: #6366f1;
+  background: var(--accent-primary);
   color: white;
   border-radius: 2px;
 }
@@ -1994,6 +2292,8 @@ tr:hover .btn-edit-inline {
 .frame-data {
   color: var(--text-secondary);
   word-break: break-all;
+  word-spacing: -2px;
+  letter-spacing: -0.3px;
 }
 
 .log-error {

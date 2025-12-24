@@ -143,12 +143,13 @@ export function useTabStore() {
 
       // Data Display
       dataFormat: 'unsigned', // unsigned, signed, hex, float32, binary
-      registerData: [], // [{address, value, rawHex}]
-      coilData: [], // [{address, value}]
+      registerData: [], // [{address, value, rawHex}] for FC03/FC04
+      coilData: [], // [{address, value}] for FC01 Read Coils
+      discreteInputData: [], // [{address, value}] for FC02 Read Discrete Inputs
 
       // Transaction Log
       transactionLog: [], // [{id, type, timestamp, functionCode, requestFrame, responseFrame, success, responseTime, data}]
-      maxLogEntries: 100,
+      maxLogEntries: 1000,
 
       // Polling
       pollingEnabled: false,
@@ -202,7 +203,7 @@ export function useTabStore() {
 
       // Request log
       requestLog: [],
-      maxLogEntries: 100,
+      maxLogEntries: 1000,
 
       // Statistics
       requestCount: 0,

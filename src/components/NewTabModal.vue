@@ -7,6 +7,10 @@ const props = defineProps({
     type: Boolean,
     default: false,
   },
+  canCancel: {
+    type: Boolean,
+    default: true,
+  },
 });
 
 const emit = defineEmits(['select', 'cancel']);
@@ -21,11 +25,11 @@ function selectType(type) {
 <template>
   <Teleport to="body">
     <Transition name="dialog">
-      <div v-if="visible" class="dialog-overlay" @click.self="emit('cancel')">
+      <div v-if="visible" class="dialog-overlay" @click.self="canCancel && emit('cancel')">
         <div class="dialog-content">
           <div class="dialog-header">
             <h3>{{ t.selectConnectionType }}</h3>
-            <button class="close-btn" @click="emit('cancel')">
+            <button v-if="canCancel" class="close-btn" @click="emit('cancel')">
               <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                 <line x1="18" y1="6" x2="6" y2="18"/>
                 <line x1="6" y1="6" x2="18" y2="18"/>

@@ -1742,6 +1742,11 @@ fn modbus_request(
 
     let response_time = start_time.elapsed().as_millis() as u64;
 
+    // Truncate coils to requested quantity (backend unpacks all bits from bytes)
+    let truncated_coils = parsed.coils.map(|coils| {
+        coils.into_iter().take(request.quantity as usize).collect()
+    });
+
     // Build response
     let response = ModbusResponse {
         connection_id: request.connection_id.clone(),
@@ -1749,9 +1754,10 @@ fn modbus_request(
         slave_id: parsed.slave_id,
         function_code: parsed.function_code,
         start_address: request.start_address,
+        quantity: request.quantity,
         success: !parsed.is_exception,
         data: parsed.data,
-        coils: parsed.coils,
+        coils: truncated_coils,
         error_code: parsed.exception_code,
         error_message: parsed.exception_code.map(format_exception_error),
         request_frame,
@@ -1858,15 +1864,20 @@ fn modbus_start_polling(
                                         if let Ok(n) = port.read(&mut buffer) {
                                             if n >= 5 {
                                                 if let Ok(parsed) = parse_rtu_response(&buffer[..n], poll_req.function_code) {
+                                                    // Truncate coils to requested quantity
+                                                    let truncated_coils = parsed.coils.map(|coils| {
+                                                        coils.into_iter().take(poll_req.quantity as usize).collect()
+                                                    });
                                                     Some(ModbusResponse {
                                                         connection_id: connection_id.clone(),
                                                         transaction_id: 0,
                                                         slave_id: parsed.slave_id,
                                                         function_code: parsed.function_code,
                                                         start_address: poll_req.start_address,
+                                                        quantity: poll_req.quantity,
                                                         success: !parsed.is_exception,
                                                         data: parsed.data,
-                                                        coils: parsed.coils,
+                                                        coils: truncated_coils,
                                                         error_code: parsed.exception_code,
                                                         error_message: parsed.exception_code.map(format_exception_error),
                                                         request_frame: frame,
@@ -1940,15 +1951,20 @@ fn modbus_start_polling(
                                                     Ok(response_frame) => {
                                                         drop(rx);
                                                         if let Ok(parsed) = parse_tcp_response(&response_frame, poll_req.function_code) {
+                                                            // Truncate coils to requested quantity
+                                                            let truncated_coils = parsed.coils.map(|coils| {
+                                                                coils.into_iter().take(poll_req.quantity as usize).collect()
+                                                            });
                                                             break Some(ModbusResponse {
                                                                 connection_id: connection_id.clone(),
                                                                 transaction_id,
                                                                 slave_id: parsed.slave_id,
                                                                 function_code: parsed.function_code,
                                                                 start_address: poll_req.start_address,
+                                                                quantity: poll_req.quantity,
                                                                 success: !parsed.is_exception,
                                                                 data: parsed.data,
-                                                                coils: parsed.coils,
+                                                                coils: truncated_coils,
                                                                 error_code: parsed.exception_code,
                                                                 error_message: parsed.exception_code.map(format_exception_error),
                                                                 request_frame: frame,
@@ -2086,7 +2102,7 @@ fn modbus_slave_rtu_start(
     let _ = app.emit("modbus-slave-status", ModbusSlaveStatusEvent {
         connection_id: connection_id.clone(),
         status: "started".to_string(),
-        message: Some(format!("Slave RTU started on {} (ID: {})", config.port_name, slave_id)),
+        message: Some(format!("RTU {} [ID:{}]", config.port_name, slave_id)),
         timestamp: modbus::get_timestamp(),
     });
 
@@ -2295,7 +2311,7 @@ fn modbus_slave_tcp_start(
         let _ = app_clone.emit("modbus-slave-status", ModbusSlaveStatusEvent {
             connection_id: connection_id_clone.clone(),
             status: "started".to_string(),
-            message: Some(format!("Slave TCP listening on {} (Unit ID: {})", addr, unit_id)),
+            message: Some(format!("TCP {} [ID:{}]", addr, unit_id)),
             timestamp: modbus::get_timestamp(),
         });
 
