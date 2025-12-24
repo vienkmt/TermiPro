@@ -152,6 +152,7 @@ pub struct ModbusResponse {
     pub transaction_id: u16,
     pub slave_id: u8,
     pub function_code: u8,
+    pub start_address: u16,
     pub success: bool,
     pub data: Option<Vec<u16>>,
     pub coils: Option<Vec<bool>>,

@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, inject, watch } from 'vue';
+import { ref, computed, inject, watch, nextTick } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 const props = defineProps({
@@ -28,6 +28,7 @@ const isLoading = ref(false);
 
 // Constants
 const MAX_LOG_ENTRIES = 100;
+const MAX_VISIBLE_ENTRIES = 50; // Limit visible entries for performance
 
 // Config options
 const baudRateOptions = [9600, 19200, 38400, 57600, 115200];
@@ -63,6 +64,13 @@ const isReadOperation = computed(() => currentFunctionCode.value?.type === 'read
 const isWriteOperation = computed(() => currentFunctionCode.value?.type?.startsWith('write'));
 const isSingleWrite = computed(() => currentFunctionCode.value?.type === 'write-single');
 const isCoilOperation = computed(() => currentFunctionCode.value?.isCoil);
+
+// Displayed log entries - limit and reverse for performance (newest at bottom)
+const displayedLogEntries = computed(() => {
+  const log = props.tabState.transactionLog || [];
+  // Take last MAX_VISIBLE_ENTRIES and reverse so newest is at bottom
+  return log.slice(0, MAX_VISIBLE_ENTRIES).reverse();
+});
 
 // Helpers
 function formatBaudRate(rate) {
@@ -268,6 +276,15 @@ watch(() => props.tabState.functionCode, (newFc) => {
     props.tabState.writeValues = props.tabState.writeValues.length > 0 ? props.tabState.writeValues : [0];
     props.tabState.coilValues = props.tabState.coilValues.length > 0 ? props.tabState.coilValues : [false];
   }
+});
+
+// Auto scroll log when new entries are added
+watch(() => props.tabState.transactionLog?.length, () => {
+  nextTick(() => {
+    if (transactionLogRef.value) {
+      transactionLogRef.value.scrollTop = transactionLogRef.value.scrollHeight;
+    }
+  });
 });
 
 // Add/remove write values
@@ -675,6 +692,8 @@ function removeWriteValue(index) {
 
     <!-- Main Area -->
     <main class="main-area">
+      <!-- Content wrapper: Data + Log side by side -->
+      <div class="content-wrapper">
       <!-- Data Display -->
       <div class="data-section">
         <div class="section-header">
@@ -779,7 +798,7 @@ function removeWriteValue(index) {
 
         <div class="log-container" ref="transactionLogRef">
           <div
-            v-for="entry in tabState.transactionLog"
+            v-for="entry in displayedLogEntries"
             :key="entry.id"
             class="log-entry"
             :class="entry.type"
@@ -807,11 +826,12 @@ function removeWriteValue(index) {
             </div>
           </div>
 
-          <div v-if="tabState.transactionLog.length === 0" class="empty-log">
+          <div v-if="displayedLogEntries.length === 0" class="empty-log">
             No transactions yet
           </div>
         </div>
       </div>
+      </div><!-- End content-wrapper -->
     </main>
   </div>
 </template>
@@ -840,7 +860,13 @@ function removeWriteValue(index) {
   flex-direction: column;
   overflow: hidden;
   padding: 8px;
+}
+
+.content-wrapper {
+  flex: 1;
+  display: flex;
   gap: 8px;
+  overflow: hidden;
 }
 
 /* Mode Selector */
@@ -1290,10 +1316,12 @@ function removeWriteValue(index) {
 
 /* Data Section */
 .data-section {
-  flex: 1;
+  flex: 0 0 auto;
+  width: 42%;
+  min-width: 340px;
+  max-width: 450px;
   display: flex;
   flex-direction: column;
-  min-height: 150px;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -1315,6 +1343,14 @@ function removeWriteValue(index) {
   margin: 0;
 }
 
+.log-section .section-header {
+  padding: 4px 8px;
+}
+
+.log-section .section-header h3 {
+  font-size: 10px;
+}
+
 .format-selector {
   display: flex;
   align-items: center;
@@ -1325,7 +1361,7 @@ function removeWriteValue(index) {
 }
 
 .btn-clear-data, .btn-clear-log {
-  padding: 3px;
+  padding: 2px;
   border: none;
   background: transparent;
   color: var(--text-secondary);
@@ -1336,9 +1372,14 @@ function removeWriteValue(index) {
   justify-content: center;
 }
 
-.btn-clear-data svg, .btn-clear-log svg {
+.btn-clear-data svg {
   width: 12px;
   height: 12px;
+}
+
+.btn-clear-log svg {
+  width: 10px;
+  height: 10px;
 }
 
 .btn-clear-data:hover, .btn-clear-log:hover {
@@ -1425,7 +1466,7 @@ function removeWriteValue(index) {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 120px;
+  min-width: 0;
   background: var(--bg-secondary);
   border: 1px solid var(--border-color);
   border-radius: var(--radius-sm);
@@ -1433,7 +1474,7 @@ function removeWriteValue(index) {
 }
 
 .log-count {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-tertiary);
   margin-left: auto;
 }
@@ -1441,12 +1482,12 @@ function removeWriteValue(index) {
 .log-container {
   flex: 1;
   overflow-y: auto;
-  padding: 4px;
+  padding: 3px;
 }
 
 .log-entry {
-  padding: 5px 6px;
-  margin-bottom: 4px;
+  padding: 3px 5px;
+  margin-bottom: 3px;
   background: var(--bg-primary);
   border-radius: var(--radius-sm);
   border-left: 2px solid var(--success);
@@ -1459,30 +1500,30 @@ function removeWriteValue(index) {
 .log-header {
   display: flex;
   align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
+  gap: 4px;
+  margin-bottom: 2px;
 }
 
 .log-time {
-  font-size: 10px;
+  font-size: 9px;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
 }
 
 .log-fc {
-  font-size: 10px;
+  font-size: 9px;
   font-weight: 600;
-  padding: 1px 4px;
+  padding: 0px 3px;
   background: var(--accent-primary);
   color: white;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .log-status {
-  font-size: 9px;
+  font-size: 8px;
   font-weight: 600;
-  padding: 1px 4px;
-  border-radius: 3px;
+  padding: 0px 3px;
+  border-radius: 2px;
 }
 
 .log-status.success {
@@ -1496,24 +1537,24 @@ function removeWriteValue(index) {
 }
 
 .log-duration {
-  font-size: 9px;
+  font-size: 8px;
   color: var(--text-tertiary);
   margin-left: auto;
 }
 
 .log-frames {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .log-frame {
   display: flex;
-  gap: 6px;
-  margin-bottom: 1px;
+  gap: 4px;
+  margin-bottom: 0px;
 }
 
 .frame-label {
-  min-width: 20px;
+  min-width: 18px;
   font-weight: 600;
 }
 
@@ -1531,12 +1572,12 @@ function removeWriteValue(index) {
 }
 
 .log-error {
-  margin-top: 4px;
-  padding: 4px;
+  margin-top: 2px;
+  padding: 2px 4px;
   background: rgba(239, 68, 68, 0.1);
   border-radius: var(--radius-sm);
   color: var(--danger);
-  font-size: 10px;
+  font-size: 9px;
 }
 
 .empty-log {
@@ -1545,6 +1586,6 @@ function removeWriteValue(index) {
   justify-content: center;
   height: 100%;
   color: var(--text-tertiary);
-  font-size: 11px;
+  font-size: 10px;
 }
 </style>

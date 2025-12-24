@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, inject, watch, onMounted, onUnmounted } from 'vue';
+import { ref, computed, inject, watch, nextTick, onMounted, onUnmounted } from 'vue';
 import { invoke } from '@tauri-apps/api/core';
 
 const props = defineProps({
@@ -35,6 +35,7 @@ const autoIncrementInterval = 500; // ms between increments
 
 // Constants
 const MAX_LOG_ENTRIES = 100;
+const MAX_VISIBLE_ENTRIES = 50; // Limit visible entries for performance
 
 // Config options
 const baudRateOptions = [9600, 19200, 38400, 57600, 115200];
@@ -82,6 +83,13 @@ const displayData = computed(() => {
   }
 
   return sourceData.slice(start, start + qty);
+});
+
+// Displayed log entries - limit and reverse for performance (newest at bottom)
+const displayedLogEntries = computed(() => {
+  const log = props.tabState.requestLog || [];
+  // Take last MAX_VISIBLE_ENTRIES and reverse so newest is at bottom
+  return log.slice(0, MAX_VISIBLE_ENTRIES).reverse();
 });
 
 // Helpers
@@ -475,6 +483,15 @@ watch(() => props.tabState.activeDataTab, () => {
   if (props.tabState.isConnected) {
     refreshData();
   }
+});
+
+// Auto scroll log when new entries are added
+watch(() => props.tabState.requestLog?.length, () => {
+  nextTick(() => {
+    if (requestLogRef.value) {
+      requestLogRef.value.scrollTop = requestLogRef.value.scrollHeight;
+    }
+  });
 });
 
 // Initialize data arrays
@@ -1034,7 +1051,7 @@ onUnmounted(() => {
 
         <div class="log-container" ref="requestLogRef">
           <div
-            v-for="entry in tabState.requestLog"
+            v-for="entry in displayedLogEntries"
             :key="entry.id"
             class="log-entry"
             :class="entry.success ? 'success' : 'error'"
@@ -1063,7 +1080,7 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="!tabState.requestLog?.length" class="empty-log">
+          <div v-if="displayedLogEntries.length === 0" class="empty-log">
             No requests received yet. Start the slave to begin listening.
           </div>
         </div>
