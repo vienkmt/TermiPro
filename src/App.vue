@@ -11,6 +11,7 @@ import SerialTab from "./components/SerialTab.vue";
 import TcpClientTab from "./components/TcpClientTab.vue";
 import TcpServerTab from "./components/TcpServerTab.vue";
 import ModbusTab from "./components/ModbusTab.vue";
+import ModbusSlaveTab from "./components/ModbusSlaveTab.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import NewTabModal from "./components/NewTabModal.vue";
@@ -118,6 +119,8 @@ const translations = {
     tcpClientDesc: "Kết nối đến server TCP từ xa",
     tcpServerDesc: "Lắng nghe kết nối TCP đến",
     modbusDesc: "Giao tiếp Modbus RTU/TCP với thiết bị công nghiệp",
+    connectionTypeModbusSlave: "Modbus Slave",
+    modbusSlaveDesc: "Mô phỏng thiết bị Modbus RTU/TCP",
     // Modbus
     mode: "Chế độ",
     rtu: "RTU",
@@ -267,6 +270,8 @@ const translations = {
     tcpClientDesc: "Connect to remote TCP server",
     tcpServerDesc: "Listen for incoming TCP connections",
     modbusDesc: "Modbus RTU/TCP communication with industrial devices",
+    connectionTypeModbusSlave: "Modbus Slave",
+    modbusSlaveDesc: "Simulate Modbus RTU/TCP device",
     // Modbus
     mode: "Mode",
     rtu: "RTU",
@@ -373,6 +378,12 @@ let unlistenTcpServerClientEvent = null;
 let unlistenModbusStatus = null;
 let unlistenModbusResponse = null;
 let unlistenModbusPollData = null;
+
+// Modbus Slave event listeners
+let unlistenModbusSlaveStatus = null;
+let unlistenModbusSlaveRequest = null;
+let unlistenModbusSlaveDataChanged = null;
+let unlistenModbusSlaveTcpClientEvent = null;
 
 // Batching for terminal updates (performance optimization)
 const pendingRxData = new Map(); // port_name -> [{data, timestamp}]
@@ -498,6 +509,10 @@ async function requestCloseTab(tabId) {
         }
         await invoke("modbus_disconnect", {
           connectionId: tab.modbusConnectionId || tab.connectionId,
+        });
+      } else if (tab.connectionType === CONNECTION_TYPES.MODBUS_SLAVE) {
+        await invoke("modbus_slave_stop", {
+          connectionId: tab.slaveConnectionId || tab.connectionId,
         });
       }
       tab.isConnected = false;
@@ -745,6 +760,76 @@ async function handleModbusDisconnect(tabId) {
     tab.modbusConnectionId = null;
   } catch (error) {
     console.error("Modbus disconnect error:", error);
+    alert("Error: " + error);
+  }
+}
+
+// ===================== MODBUS SLAVE HANDLERS =====================
+
+// Modbus Slave start (RTU or TCP)
+async function handleModbusSlaveStart(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  try {
+    let connectionId;
+
+    if (tab.mode === 'rtu') {
+      // RTU mode - use serial port
+      if (!tab.selectedPort) {
+        alert(t.value.pleaseSelectPort);
+        return;
+      }
+
+      const config = {
+        port_name: tab.selectedPort,
+        baud_rate: tab.baudRate,
+        data_bits: tab.dataBits,
+        stop_bits: tab.stopBits,
+        parity: tab.parity,
+        slave_id: tab.slaveId,
+      };
+
+      connectionId = await invoke("modbus_slave_rtu_start", { config });
+    } else {
+      // TCP mode
+      const config = {
+        bind_address: tab.bindAddress,
+        listen_port: tab.listenPort,
+        unit_id: tab.unitId,
+      };
+
+      connectionId = await invoke("modbus_slave_tcp_start", { config });
+    }
+
+    // Store the actual connection ID returned from backend
+    tab.slaveConnectionId = connectionId;
+    tab.isConnected = true;
+    tab.connectionStatus = 'connected';
+    tab.statusMessage = null;
+  } catch (error) {
+    console.error("Modbus Slave start error:", error);
+    tab.connectionStatus = 'error';
+    tab.statusMessage = String(error);
+    alert("Error: " + error);
+  }
+}
+
+// Modbus Slave stop
+async function handleModbusSlaveStop(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  try {
+    await invoke("modbus_slave_stop", {
+      connectionId: tab.slaveConnectionId || tab.connectionId,
+    });
+    tab.isConnected = false;
+    tab.connectionStatus = 'idle';
+    tab.slaveConnectionId = null;
+    tab.connectedClients = [];
+  } catch (error) {
+    console.error("Modbus Slave stop error:", error);
     alert("Error: " + error);
   }
 }
@@ -1161,6 +1246,94 @@ onMounted(async () => {
       }
     }
   });
+
+  // ===================== MODBUS SLAVE EVENT LISTENERS =====================
+
+  // Modbus Slave status listener
+  unlistenModbusSlaveStatus = await listen("modbus-slave-status", (event) => {
+    const { connection_id, status, message } = event.payload;
+    const tab = tabStore.getModbusSlaveTabByConnectionId(connection_id);
+    if (tab) {
+      tab.connectionStatus = status;
+      tab.statusMessage = message || null;
+
+      if (status === "started" || status === "connected") {
+        tab.isConnected = true;
+      } else if (status === "stopped" || status === "disconnected" || status === "error") {
+        tab.isConnected = false;
+        tab.connectedClients = [];
+      }
+    }
+  });
+
+  // Modbus Slave request listener
+  unlistenModbusSlaveRequest = await listen("modbus-slave-request", (event) => {
+    const { connection_id, function_code, start_address, quantity, success, request_frame, response_frame, response_time_ms, error_message, timestamp } = event.payload;
+    const tab = tabStore.getModbusSlaveTabByConnectionId(connection_id);
+    if (tab) {
+      // Add to request log
+      const logEntry = {
+        id: Date.now(),
+        timestamp: new Date(timestamp).toLocaleTimeString(),
+        function_code,
+        start_address,
+        quantity,
+        success,
+        request_frame,
+        response_frame,
+        response_time_ms,
+        error_message,
+      };
+
+      tab.requestLog.unshift(logEntry);
+      // Limit log entries
+      if (tab.requestLog.length > tab.maxLogEntries) {
+        tab.requestLog.pop();
+      }
+
+      // Update request count and time
+      tab.requestCount = (tab.requestCount || 0) + 1;
+      tab.lastRequestTime = new Date(timestamp).toLocaleTimeString();
+    }
+  });
+
+  // Modbus Slave data changed listener
+  unlistenModbusSlaveDataChanged = await listen("modbus-slave-data-changed", (event) => {
+    const { connection_id, data_type, start_address, values } = event.payload;
+    const tab = tabStore.getModbusSlaveTabByConnectionId(connection_id);
+    if (tab && values) {
+      // Update local data arrays when master writes data
+      switch (data_type) {
+        case 'coils':
+          for (let i = 0; i < values.length; i++) {
+            tab.coilsData[start_address + i] = values[i];
+          }
+          break;
+        case 'holding_registers':
+          for (let i = 0; i < values.length; i++) {
+            tab.holdingRegistersData[start_address + i] = values[i];
+          }
+          break;
+      }
+    }
+  });
+
+  // Modbus Slave TCP client event listener
+  unlistenModbusSlaveTcpClientEvent = await listen("modbus-slave-tcp-client-event", (event) => {
+    const { connection_id, client_id, address, event_type } = event.payload;
+    const tab = tabStore.getModbusSlaveTabByConnectionId(connection_id);
+    if (tab) {
+      if (event_type === "connected") {
+        tab.connectedClients.push({
+          id: client_id,
+          address: address,
+          connected_at: new Date().toLocaleTimeString(),
+        });
+      } else if (event_type === "disconnected") {
+        tab.connectedClients = tab.connectedClients.filter(c => c.id !== client_id);
+      }
+    }
+  });
 });
 
 onUnmounted(async () => {
@@ -1200,6 +1373,20 @@ onUnmounted(async () => {
     unlistenModbusPollData();
   }
 
+  // Cleanup Modbus Slave event listeners
+  if (unlistenModbusSlaveStatus) {
+    unlistenModbusSlaveStatus();
+  }
+  if (unlistenModbusSlaveRequest) {
+    unlistenModbusSlaveRequest();
+  }
+  if (unlistenModbusSlaveDataChanged) {
+    unlistenModbusSlaveDataChanged();
+  }
+  if (unlistenModbusSlaveTcpClientEvent) {
+    unlistenModbusSlaveTcpClientEvent();
+  }
+
   // Clear update check interval
   if (updateCheckInterval) {
     clearInterval(updateCheckInterval);
@@ -1224,6 +1411,10 @@ onUnmounted(async () => {
           }
           await invoke("modbus_disconnect", {
             connectionId: tab.modbusConnectionId || tab.connectionId,
+          });
+        } else if (tab.connectionType === CONNECTION_TYPES.MODBUS_SLAVE) {
+          await invoke("modbus_slave_stop", {
+            connectionId: tab.slaveConnectionId || tab.connectionId,
           });
         }
       } catch (error) {
@@ -1346,6 +1537,18 @@ onUnmounted(async () => {
           :ports="ports"
           @connect="handleModbusConnect"
           @disconnect="handleModbusDisconnect"
+          @refresh-ports="refreshPorts"
+        />
+
+        <!-- Modbus Slave Tab -->
+        <ModbusSlaveTab
+          v-else-if="tab.connectionType === 'modbus_slave'"
+          v-show="tabId === activeTabId"
+          :tab-id="tabId"
+          :tab-state="tab"
+          :ports="ports"
+          @connect="handleModbusSlaveStart"
+          @disconnect="handleModbusSlaveStop"
           @refresh-ports="refreshPorts"
         />
       </template>

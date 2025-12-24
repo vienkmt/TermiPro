@@ -13,7 +13,9 @@ use tokio::sync::mpsc;
 use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
 mod modbus;
+mod modbus_slave;
 use modbus::*;
+use modbus_slave::*;
 
 // Struct để lưu thông tin cổng serial
 #[derive(Debug, Serialize, Clone)]
@@ -214,6 +216,25 @@ impl Default for ModbusState {
                 .enable_all()
                 .build()
                 .expect("Failed to create Modbus Tokio runtime"),
+        }
+    }
+}
+
+// Quản lý trạng thái Modbus Slave
+pub struct ModbusSlaveState {
+    connections: Arc<Mutex<HashMap<String, ModbusSlaveHandle>>>,
+    runtime: tokio::runtime::Runtime,
+}
+
+impl Default for ModbusSlaveState {
+    fn default() -> Self {
+        Self {
+            connections: Arc::new(Mutex::new(HashMap::new())),
+            runtime: tokio::runtime::Builder::new_multi_thread()
+                .worker_threads(2)
+                .enable_all()
+                .build()
+                .expect("Failed to create Modbus Slave Tokio runtime"),
         }
     }
 }
@@ -1992,6 +2013,797 @@ fn modbus_stop_polling(
     Ok("Polling stopped".to_string())
 }
 
+// ===================== MODBUS SLAVE COMMANDS =====================
+
+/// Khởi động Modbus Slave RTU (Serial)
+#[tauri::command]
+fn modbus_slave_rtu_start(
+    app: AppHandle,
+    state: State<ModbusSlaveState>,
+    config: ModbusSlaveRtuConfig,
+) -> Result<String, String> {
+    let connection_id = format!("modbus-slave-rtu-{}", config.port_name.replace("/", "_"));
+
+    // Kiểm tra xem connection đã tồn tại chưa
+    {
+        let connections = state.connections.lock();
+        if connections.contains_key(&connection_id) {
+            return Err(format!("Slave {} đã đang chạy", connection_id));
+        }
+    }
+
+    // Parse serial config
+    let data_bits = match config.data_bits {
+        5 => DataBits::Five,
+        6 => DataBits::Six,
+        7 => DataBits::Seven,
+        8 => DataBits::Eight,
+        _ => return Err("Data bits không hợp lệ".to_string()),
+    };
+
+    let stop_bits = match config.stop_bits.as_str() {
+        "1" => StopBits::One,
+        "1.5" => StopBits::Two,
+        "2" => StopBits::Two,
+        _ => return Err("Stop bits không hợp lệ".to_string()),
+    };
+
+    let parity = match config.parity.to_lowercase().as_str() {
+        "none" => Parity::None,
+        "odd" => Parity::Odd,
+        "even" => Parity::Even,
+        _ => return Err("Parity không hợp lệ".to_string()),
+    };
+
+    // Mở serial port
+    let port = serialport::new(&config.port_name, config.baud_rate)
+        .data_bits(data_bits)
+        .stop_bits(stop_bits)
+        .parity(parity)
+        .flow_control(FlowControl::None)
+        .timeout(Duration::from_millis(10))
+        .open()
+        .map_err(|e| format!("Không thể mở port {}: {}", config.port_name, e))?;
+
+    let slave_id = config.slave_id;
+    let handle = ModbusSlaveHandle::new_rtu(config.clone());
+    let data = handle.data.clone();
+
+    // Lưu connection
+    let connection_id_clone = connection_id.clone();
+    // Clone cho thread
+    let connections_clone = state.connections.clone();
+
+    {
+        let mut connections = state.connections.lock();
+        connections.insert(connection_id.clone(), handle);
+    }
+
+    // Emit status
+    let _ = app.emit("modbus-slave-status", ModbusSlaveStatusEvent {
+        connection_id: connection_id.clone(),
+        status: "started".to_string(),
+        message: Some(format!("Slave RTU started on {} (ID: {})", config.port_name, slave_id)),
+        timestamp: modbus::get_timestamp(),
+    });
+
+    let app_clone = app.clone();
+
+    // Spawn thread đọc và xử lý requests
+    thread::spawn(move || {
+        let mut port = port;
+        let mut buffer = [0u8; 256];
+        let mut frame_buffer: Vec<u8> = Vec::with_capacity(256);
+        let mut last_byte_time = Instant::now();
+        let inter_frame_gap = Duration::from_micros(calculate_inter_frame_delay_us(config.baud_rate));
+
+        loop {
+            // Check if still running
+            let is_running = {
+                let connections = connections_clone.lock();
+                if let Some(h) = connections.get(&connection_id_clone) {
+                    h.is_running()
+                } else {
+                    false
+                }
+            };
+            if !is_running {
+                break;
+            }
+
+            // Đọc data
+            match port.read(&mut buffer) {
+                Ok(n) if n > 0 => {
+                    frame_buffer.extend_from_slice(&buffer[..n]);
+                    last_byte_time = Instant::now();
+                }
+                Ok(_) => {}
+                Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                    // Check if we have a complete frame (gap timeout)
+                    if !frame_buffer.is_empty() && last_byte_time.elapsed() > inter_frame_gap {
+                        // Try to parse and process frame
+                        if frame_buffer.len() >= 8 {
+                            if let Ok(request) = parse_rtu_request(&frame_buffer) {
+                                // Check if slave ID matches
+                                if request.slave_id == slave_id {
+                                    let start_time = Instant::now();
+
+                                    // Get handle for delay and exception checking
+                                    let delay_ms = {
+                                        let connections = connections_clone.lock();
+                                        if let Some(h) = connections.get(&connection_id_clone) {
+                                            h.get_delay_ms(request.function_code)
+                                        } else {
+                                            0
+                                        }
+                                    };
+
+                                    // Apply delay if configured
+                                    if delay_ms > 0 {
+                                        thread::sleep(Duration::from_millis(delay_ms as u64));
+                                    }
+
+                                    // Process request
+                                    let result = {
+                                        let connections = connections_clone.lock();
+                                        if let Some(h) = connections.get(&connection_id_clone) {
+                                            process_request(
+                                                &request,
+                                                &data,
+                                                ModbusMode::Rtu,
+                                                0,
+                                                &connection_id_clone,
+                                                h,
+                                            )
+                                        } else {
+                                            continue;
+                                        }
+                                    };
+
+                                    let response_time = start_time.elapsed().as_millis() as u64;
+
+                                    // Send response
+                                    if let Err(e) = port.write_all(&result.response_frame) {
+                                        eprintln!("Error sending response: {}", e);
+                                    }
+                                    let _ = port.flush();
+
+                                    // Emit request event
+                                    let _ = app_clone.emit("modbus-slave-request", ModbusSlaveRequestEvent {
+                                        connection_id: connection_id_clone.clone(),
+                                        client_id: None,
+                                        slave_id: request.slave_id,
+                                        function_code: request.function_code,
+                                        start_address: result.start_address,
+                                        quantity: result.quantity,
+                                        request_frame: frame_buffer.clone(),
+                                        response_frame: result.response_frame.clone(),
+                                        success: result.success,
+                                        error_message: result.error_message,
+                                        response_time_ms: response_time,
+                                        timestamp: modbus::get_timestamp(),
+                                    });
+
+                                    // Emit data changed if applicable
+                                    if let Some(event) = result.data_changed {
+                                        let _ = app_clone.emit("modbus-slave-data-changed", event);
+                                    }
+
+                                    // Update statistics
+                                    {
+                                        let connections = connections_clone.lock();
+                                        if let Some(h) = connections.get(&connection_id_clone) {
+                                            h.increment_request_count();
+                                            let mut stats = h.statistics.write();
+                                            stats.record_request(request.function_code, result.success, response_time);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        frame_buffer.clear();
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Serial read error: {}", e);
+                    break;
+                }
+            }
+        }
+
+        // Cleanup
+        {
+            let mut connections = connections_clone.lock();
+            connections.remove(&connection_id_clone);
+        }
+
+        let _ = app_clone.emit("modbus-slave-status", ModbusSlaveStatusEvent {
+            connection_id: connection_id_clone,
+            status: "stopped".to_string(),
+            message: None,
+            timestamp: modbus::get_timestamp(),
+        });
+    });
+
+    Ok(connection_id)
+}
+
+/// Khởi động Modbus Slave TCP (Server)
+#[tauri::command]
+fn modbus_slave_tcp_start(
+    app: AppHandle,
+    state: State<ModbusSlaveState>,
+    config: ModbusSlaveTcpConfig,
+) -> Result<String, String> {
+    let connection_id = format!("modbus-slave-tcp-{}:{}", config.bind_address, config.listen_port);
+
+    // Kiểm tra xem connection đã tồn tại chưa
+    {
+        let connections = state.connections.lock();
+        if connections.contains_key(&connection_id) {
+            return Err(format!("Slave {} đã đang chạy", connection_id));
+        }
+    }
+
+    let unit_id = config.unit_id;
+    let handle = ModbusSlaveHandle::new_tcp(config.clone());
+    let data = handle.data.clone();
+    let tcp_clients = handle.tcp_clients.clone();
+
+    // Lưu connection
+    let connection_id_clone = connection_id.clone();
+    {
+        let mut connections = state.connections.lock();
+        connections.insert(connection_id.clone(), handle);
+    }
+
+    let addr = format!("{}:{}", config.bind_address, config.listen_port);
+    let app_clone = app.clone();
+    let connections_clone = state.connections.clone();
+
+    // Spawn async task
+    state.runtime.spawn(async move {
+        let listener = match TcpListener::bind(&addr).await {
+            Ok(l) => l,
+            Err(e) => {
+                // Cleanup
+                {
+                    let mut connections = connections_clone.lock();
+                    connections.remove(&connection_id_clone);
+                }
+
+                let error_msg = if e.kind() == std::io::ErrorKind::AddrInUse {
+                    format!("Port {} đã được sử dụng", config.listen_port)
+                } else {
+                    format!("Không thể bind: {}", e)
+                };
+
+                let _ = app_clone.emit("modbus-slave-status", ModbusSlaveStatusEvent {
+                    connection_id: connection_id_clone,
+                    status: "error".to_string(),
+                    message: Some(error_msg),
+                    timestamp: modbus::get_timestamp(),
+                });
+                return;
+            }
+        };
+
+        // Emit started status
+        let _ = app_clone.emit("modbus-slave-status", ModbusSlaveStatusEvent {
+            connection_id: connection_id_clone.clone(),
+            status: "started".to_string(),
+            message: Some(format!("Slave TCP listening on {} (Unit ID: {})", addr, unit_id)),
+            timestamp: modbus::get_timestamp(),
+        });
+
+        let mut client_counter: u32 = 0;
+
+        loop {
+            // Check if still running
+            let should_continue = {
+                let connections = connections_clone.lock();
+                if let Some(h) = connections.get(&connection_id_clone) {
+                    h.is_running()
+                } else {
+                    false
+                }
+            };
+
+            if !should_continue {
+                break;
+            }
+
+            tokio::select! {
+                result = listener.accept() => {
+                    match result {
+                        Ok((stream, addr)) => {
+                            client_counter += 1;
+                            let client_id = format!("client-{}", client_counter);
+                            let remote_addr = addr.to_string();
+                            let connected_at = modbus::get_timestamp();
+
+                            // Add client
+                            if let Some(ref clients) = tcp_clients {
+                                let mut clients = clients.write();
+                                clients.insert(client_id.clone(), ModbusSlaveTcpClient {
+                                    client_id: client_id.clone(),
+                                    remote_addr: remote_addr.clone(),
+                                    connected_at,
+                                    request_count: 0,
+                                });
+                            }
+
+                            // Emit client connected
+                            let _ = app_clone.emit("modbus-slave-tcp-client-event", ModbusSlaveTcpClientEvent {
+                                connection_id: connection_id_clone.clone(),
+                                client_id: client_id.clone(),
+                                remote_addr: remote_addr.clone(),
+                                event_type: "connected".to_string(),
+                                timestamp: connected_at,
+                            });
+
+                            // Spawn client handler
+                            let data_ref = data.clone();
+                            let app_ref = app_clone.clone();
+                            let conn_id_ref = connection_id_clone.clone();
+                            let client_id_ref = client_id.clone();
+                            let remote_addr_ref = remote_addr.clone();
+                            let connections_ref = connections_clone.clone();
+                            let tcp_clients_ref = tcp_clients.clone();
+
+                            tokio::spawn(async move {
+                                let (mut read_half, mut write_half) = stream.into_split();
+                                let mut buffer = [0u8; 1024];
+
+                                loop {
+                                    // Check if still running
+                                    let should_continue = {
+                                        let connections = connections_ref.lock();
+                                        if let Some(h) = connections.get(&conn_id_ref) {
+                                            h.is_running()
+                                        } else {
+                                            false
+                                        }
+                                    };
+
+                                    if !should_continue {
+                                        break;
+                                    }
+
+                                    tokio::select! {
+                                        result = read_half.read(&mut buffer) => {
+                                            match result {
+                                                Ok(0) => break, // Client disconnected
+                                                Ok(n) => {
+                                                    let frame = &buffer[..n];
+
+                                                    // Parse TCP request
+                                                    if let Ok((transaction_id, request)) = parse_tcp_request(frame) {
+                                                        // Check unit ID
+                                                        if request.slave_id == unit_id {
+                                                            let start_time = std::time::Instant::now();
+
+                                                            // Get delay
+                                                            let delay_ms = {
+                                                                let connections = connections_ref.lock();
+                                                                if let Some(h) = connections.get(&conn_id_ref) {
+                                                                    h.get_delay_ms(request.function_code)
+                                                                } else {
+                                                                    0
+                                                                }
+                                                            };
+
+                                                            // Apply delay
+                                                            if delay_ms > 0 {
+                                                                tokio::time::sleep(Duration::from_millis(delay_ms as u64)).await;
+                                                            }
+
+                                                            // Process request
+                                                            let result = {
+                                                                let connections = connections_ref.lock();
+                                                                if let Some(h) = connections.get(&conn_id_ref) {
+                                                                    process_request(
+                                                                        &request,
+                                                                        &data_ref,
+                                                                        ModbusMode::Tcp,
+                                                                        transaction_id,
+                                                                        &conn_id_ref,
+                                                                        h,
+                                                                    )
+                                                                } else {
+                                                                    continue;
+                                                                }
+                                                            };
+
+                                                            let response_time = start_time.elapsed().as_millis() as u64;
+
+                                                            // Send response
+                                                            if let Err(_) = write_half.write_all(&result.response_frame).await {
+                                                                break;
+                                                            }
+                                                            let _ = write_half.flush().await;
+
+                                                            // Emit request event
+                                                            let _ = app_ref.emit("modbus-slave-request", ModbusSlaveRequestEvent {
+                                                                connection_id: conn_id_ref.clone(),
+                                                                client_id: Some(client_id_ref.clone()),
+                                                                slave_id: request.slave_id,
+                                                                function_code: request.function_code,
+                                                                start_address: result.start_address,
+                                                                quantity: result.quantity,
+                                                                request_frame: frame.to_vec(),
+                                                                response_frame: result.response_frame.clone(),
+                                                                success: result.success,
+                                                                error_message: result.error_message,
+                                                                response_time_ms: response_time,
+                                                                timestamp: modbus::get_timestamp(),
+                                                            });
+
+                                                            // Emit data changed
+                                                            if let Some(event) = result.data_changed {
+                                                                let _ = app_ref.emit("modbus-slave-data-changed", event);
+                                                            }
+
+                                                            // Update statistics
+                                                            {
+                                                                let connections = connections_ref.lock();
+                                                                if let Some(h) = connections.get(&conn_id_ref) {
+                                                                    h.increment_request_count();
+                                                                    let mut stats = h.statistics.write();
+                                                                    stats.record_request(request.function_code, result.success, response_time);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Err(_) => break,
+                                            }
+                                        }
+                                        _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+                                    }
+                                }
+
+                                // Cleanup client
+                                if let Some(ref clients) = tcp_clients_ref {
+                                    let mut clients = clients.write();
+                                    clients.remove(&client_id_ref);
+                                }
+
+                                // Emit client disconnected
+                                let _ = app_ref.emit("modbus-slave-tcp-client-event", ModbusSlaveTcpClientEvent {
+                                    connection_id: conn_id_ref,
+                                    client_id: client_id_ref,
+                                    remote_addr: remote_addr_ref,
+                                    event_type: "disconnected".to_string(),
+                                    timestamp: modbus::get_timestamp(),
+                                });
+                            });
+                        }
+                        Err(_) => {
+                            tokio::time::sleep(Duration::from_millis(100)).await;
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+            }
+        }
+
+        // Cleanup
+        {
+            let mut connections = connections_clone.lock();
+            connections.remove(&connection_id_clone);
+        }
+
+        let _ = app_clone.emit("modbus-slave-status", ModbusSlaveStatusEvent {
+            connection_id: connection_id_clone,
+            status: "stopped".to_string(),
+            message: None,
+            timestamp: modbus::get_timestamp(),
+        });
+    });
+
+    Ok(connection_id)
+}
+
+/// Dừng Modbus Slave
+#[tauri::command]
+fn modbus_slave_stop(
+    app: AppHandle,
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+) -> Result<String, String> {
+    let mut connections = state.connections.lock();
+
+    if let Some(handle) = connections.remove(&connection_id) {
+        handle.stop();
+
+        let _ = app.emit("modbus-slave-status", ModbusSlaveStatusEvent {
+            connection_id: connection_id.clone(),
+            status: "stopped".to_string(),
+            message: None,
+            timestamp: modbus::get_timestamp(),
+        });
+
+        Ok(format!("Đã dừng slave {}", connection_id))
+    } else {
+        Err(format!("Slave {} không tồn tại", connection_id))
+    }
+}
+
+/// Set coil value
+#[tauri::command]
+fn modbus_slave_set_coil(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    address: u16,
+    value: bool,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let mut coils = handle.data.coils.write();
+    if (address as usize) < coils.len() {
+        coils[address as usize] = value;
+        Ok(())
+    } else {
+        Err("Address out of range".to_string())
+    }
+}
+
+/// Set holding register value
+#[tauri::command]
+fn modbus_slave_set_register(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    address: u16,
+    value: u16,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let mut registers = handle.data.holding_registers.write();
+    if (address as usize) < registers.len() {
+        registers[address as usize] = value;
+        Ok(())
+    } else {
+        Err("Address out of range".to_string())
+    }
+}
+
+/// Set discrete input value
+#[tauri::command]
+fn modbus_slave_set_discrete_input(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    address: u16,
+    value: bool,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let mut discrete = handle.data.discrete_inputs.write();
+    if (address as usize) < discrete.len() {
+        discrete[address as usize] = value;
+        Ok(())
+    } else {
+        Err("Address out of range".to_string())
+    }
+}
+
+/// Set input register value
+#[tauri::command]
+fn modbus_slave_set_input_register(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    address: u16,
+    value: u16,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let mut registers = handle.data.input_registers.write();
+    if (address as usize) < registers.len() {
+        registers[address as usize] = value;
+        Ok(())
+    } else {
+        Err("Address out of range".to_string())
+    }
+}
+
+/// Get slave data
+#[tauri::command]
+fn modbus_slave_get_data(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    data_type: String,
+    start_address: u16,
+    quantity: u16,
+) -> Result<Vec<u16>, String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let start = start_address as usize;
+    let end = start + quantity as usize;
+
+    match data_type.as_str() {
+        "coils" => {
+            let coils = handle.data.coils.read();
+            if end <= coils.len() {
+                Ok(coils[start..end].iter().map(|&c| if c { 1 } else { 0 }).collect())
+            } else {
+                Err("Address out of range".to_string())
+            }
+        }
+        "discrete_inputs" => {
+            let discrete = handle.data.discrete_inputs.read();
+            if end <= discrete.len() {
+                Ok(discrete[start..end].iter().map(|&c| if c { 1 } else { 0 }).collect())
+            } else {
+                Err("Address out of range".to_string())
+            }
+        }
+        "holding_registers" => {
+            let registers = handle.data.holding_registers.read();
+            if end <= registers.len() {
+                Ok(registers[start..end].to_vec())
+            } else {
+                Err("Address out of range".to_string())
+            }
+        }
+        "input_registers" => {
+            let registers = handle.data.input_registers.read();
+            if end <= registers.len() {
+                Ok(registers[start..end].to_vec())
+            } else {
+                Err("Address out of range".to_string())
+            }
+        }
+        _ => Err(format!("Invalid data type: {}", data_type)),
+    }
+}
+
+/// Set response delay
+#[tauri::command]
+fn modbus_slave_set_delay(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    delay_config: ResponseDelayConfig,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    *handle.delay_config.write() = delay_config;
+    Ok(())
+}
+
+/// Set exception mapping
+#[tauri::command]
+fn modbus_slave_set_exception(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    mapping: ExceptionMapping,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let mut mappings = handle.exception_mappings.write();
+    mappings.push(mapping);
+    Ok(())
+}
+
+/// Clear exception mapping
+#[tauri::command]
+fn modbus_slave_clear_exception(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    start_address: u16,
+    end_address: u16,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let mut mappings = handle.exception_mappings.write();
+    mappings.retain(|m| m.start_address != start_address || m.end_address != end_address);
+    Ok(())
+}
+
+/// Get slave statistics
+#[tauri::command]
+fn modbus_slave_get_stats(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+) -> Result<SlaveStatistics, String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let stats = handle.statistics.read().clone();
+    Ok(stats)
+}
+
+/// Reset slave statistics
+#[tauri::command]
+fn modbus_slave_reset_stats(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    *handle.statistics.write() = SlaveStatistics::default();
+    Ok(())
+}
+
+/// Check if slave is running
+#[tauri::command]
+fn modbus_slave_is_running(state: State<ModbusSlaveState>, connection_id: String) -> bool {
+    let connections = state.connections.lock();
+    connections.contains_key(&connection_id)
+}
+
+/// Save slave data to file
+#[tauri::command]
+fn modbus_slave_save_data(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    file_path: String,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let export = handle.data.export();
+    let json = serde_json::to_string_pretty(&export)
+        .map_err(|e| format!("Serialize error: {}", e))?;
+
+    std::fs::write(&file_path, json)
+        .map_err(|e| format!("Write error: {}", e))?;
+
+    Ok(())
+}
+
+/// Load slave data from file
+#[tauri::command]
+fn modbus_slave_load_data(
+    state: State<ModbusSlaveState>,
+    connection_id: String,
+    file_path: String,
+) -> Result<(), String> {
+    let connections = state.connections.lock();
+    let handle = connections
+        .get(&connection_id)
+        .ok_or_else(|| format!("Slave {} không tồn tại", connection_id))?;
+
+    let json = std::fs::read_to_string(&file_path)
+        .map_err(|e| format!("Read error: {}", e))?;
+
+    let export: ModbusSlaveDataExport = serde_json::from_str(&json)
+        .map_err(|e| format!("Parse error: {}", e))?;
+
+    handle.data.import(export);
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2001,6 +2813,7 @@ pub fn run() {
         .manage(SerialState::default())
         .manage(TcpState::default())
         .manage(ModbusState::default())
+        .manage(ModbusSlaveState::default())
         .invoke_handler(tauri::generate_handler![
             // Serial commands
             list_serial_ports,
@@ -2021,14 +2834,31 @@ pub fn run() {
             tcp_server_disconnect_client,
             tcp_server_get_clients,
             is_tcp_server_running,
-            // Modbus commands
+            // Modbus Master commands
             modbus_rtu_connect,
             modbus_tcp_connect,
             modbus_disconnect,
             modbus_request,
             modbus_is_connected,
             modbus_start_polling,
-            modbus_stop_polling
+            modbus_stop_polling,
+            // Modbus Slave commands
+            modbus_slave_rtu_start,
+            modbus_slave_tcp_start,
+            modbus_slave_stop,
+            modbus_slave_set_coil,
+            modbus_slave_set_register,
+            modbus_slave_set_discrete_input,
+            modbus_slave_set_input_register,
+            modbus_slave_get_data,
+            modbus_slave_set_delay,
+            modbus_slave_set_exception,
+            modbus_slave_clear_exception,
+            modbus_slave_get_stats,
+            modbus_slave_reset_stats,
+            modbus_slave_is_running,
+            modbus_slave_save_data,
+            modbus_slave_load_data
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

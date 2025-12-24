@@ -98,6 +98,27 @@ function selectType(type) {
                 <p>{{ t.modbusDesc }}</p>
               </div>
             </div>
+
+            <!-- Modbus Slave -->
+            <div class="type-card" @click="selectType(CONNECTION_TYPES.MODBUS_SLAVE)">
+              <div class="type-icon modbus-slave">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <rect x="4" y="2" width="16" height="6" rx="1"/>
+                  <rect x="4" y="9" width="16" height="6" rx="1"/>
+                  <rect x="4" y="16" width="16" height="6" rx="1"/>
+                  <circle cx="7" cy="5" r="1" fill="currentColor"/>
+                  <circle cx="7" cy="12" r="1" fill="currentColor"/>
+                  <circle cx="7" cy="19" r="1" fill="currentColor"/>
+                  <line x1="11" y1="5" x2="17" y2="5"/>
+                  <line x1="11" y1="12" x2="17" y2="12"/>
+                  <line x1="11" y1="19" x2="17" y2="19"/>
+                </svg>
+              </div>
+              <div class="type-info">
+                <h4>{{ t.connectionTypeModbusSlave }}</h4>
+                <p>{{ t.modbusSlaveDesc }}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -222,6 +243,11 @@ function selectType(type) {
 
 .type-icon.modbus {
   background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: white;
+}
+
+.type-icon.modbus-slave {
+  background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
   color: white;
 }
 

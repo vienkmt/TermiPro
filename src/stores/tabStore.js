@@ -9,6 +9,7 @@ export const CONNECTION_TYPES = {
   TCP_CLIENT: 'tcp_client',
   TCP_SERVER: 'tcp_server',
   MODBUS: 'modbus',
+  MODBUS_SLAVE: 'modbus_slave',
 };
 
 // Singleton store instance
@@ -161,6 +162,61 @@ export function useTabStore() {
     });
   }
 
+  // Modbus Slave tab state
+  function createModbusSlaveTabState(id) {
+    return reactive({
+      id,
+      connectionType: CONNECTION_TYPES.MODBUS_SLAVE,
+      connectionId: id,
+      slaveConnectionId: null,
+      isConnected: false,
+
+      // Mode: 'rtu' or 'tcp'
+      mode: 'rtu',
+
+      // RTU Config (Serial)
+      selectedPort: '',
+      baudRate: 9600,
+      dataBits: 8,
+      stopBits: '1',
+      parity: 'even',
+      slaveId: 1,
+
+      // TCP Config
+      bindAddress: '0.0.0.0',
+      listenPort: 502,
+      unitId: 1,
+      connectedClients: [],
+
+      // Data view
+      activeDataTab: 'holding_registers', // coils, discrete_inputs, holding_registers, input_registers
+      viewStartAddress: 0,
+      viewQuantity: 100,
+      dataFormat: 'unsigned', // unsigned, signed, hex, binary
+
+      // Data storage (synced from backend)
+      coilsData: [],
+      discreteInputsData: [],
+      holdingRegistersData: [],
+      inputRegistersData: [],
+
+      // Request log
+      requestLog: [],
+      maxLogEntries: 100,
+
+      // Statistics
+      requestCount: 0,
+      lastRequestTime: null,
+
+      // Response delay config
+      responseDelay: 0,
+
+      // Status
+      connectionStatus: 'idle',
+      statusMessage: null,
+    });
+  }
+
   // Create a new tab with specified connection type
   function createTab(connectionType = CONNECTION_TYPES.SERIAL) {
     if (!canAddTab.value) return null;
@@ -177,6 +233,9 @@ export function useTabStore() {
         break;
       case CONNECTION_TYPES.MODBUS:
         tabState = createModbusTabState(id);
+        break;
+      case CONNECTION_TYPES.MODBUS_SLAVE:
+        tabState = createModbusSlaveTabState(id);
         break;
       default:
         tabState = createSerialTabState(id);
@@ -273,6 +332,18 @@ export function useTabStore() {
     return null;
   }
 
+  // Get Modbus Slave tab by connection ID
+  function getModbusSlaveTabByConnectionId(connectionId) {
+    for (const [, tab] of tabs) {
+      if (tab.connectionType === CONNECTION_TYPES.MODBUS_SLAVE) {
+        if (tab.connectionId === connectionId || tab.slaveConnectionId === connectionId) {
+          return tab;
+        }
+      }
+    }
+    return null;
+  }
+
   // Check if port is already connected in any tab
   function isPortConnected(portName) {
     for (const [, tab] of tabs) {
@@ -314,6 +385,7 @@ export function useTabStore() {
     getTabByPortName,
     getTabByConnectionId,
     getModbusTabByConnectionId,
+    getModbusSlaveTabByConnectionId,
     isPortConnected,
     getConnectedPorts,
 
