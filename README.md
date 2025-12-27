@@ -16,6 +16,12 @@
   <img src="https://img.shields.io/badge/Platform-macOS%20|%20Windows%20|%20Linux-lightgrey" alt="Platform">
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/github/downloads/vienkmt/TermiPro/total?label=Downloads" />
+  <img src="https://img.shields.io/github/contributors/vienkmt/TermiPro" />
+  <img src="https://img.shields.io/github/last-commit/vienkmt/TermiPro" />
+</p>
+
 ---
 
 ## Tiếng Việt
