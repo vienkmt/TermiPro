@@ -45,3 +45,6 @@ secrets/
 .tauri/
 /.claude
 /plans
+
+# Repomix output
+repomix-output.xml

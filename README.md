@@ -171,9 +171,25 @@ npm run tauri build
 | Component | Technology |
 |-----------|------------|
 | Frontend | Vue.js 3 + Vite |
-| Backend | Rust |
+| Backend | Rust 1.70+ |
 | Framework | Tauri 2 |
 | Fonts | Plus Jakarta Sans, JetBrains Mono |
+
+## Documentation
+
+Complete documentation available in the `docs/` directory:
+
+- **[Project Overview & PDR](docs/project-overview-pdr.md)** - Requirements and specifications
+- **[System Architecture](docs/system-architecture.md)** - Design and component structure
+- **[Code Standards](docs/code-standards.md)** - Coding conventions and guidelines
+- **[Codebase Summary](docs/codebase-summary.md)** - File structure and metrics
+- **[Getting Started Guide](docs/helps/getting-started.md)** - User quick start
+
+For protocol-specific guides:
+- [Serial Connection](docs/helps/serial.md)
+- [TCP Client/Server](docs/tcp-client.md), [TCP Server](docs/tcp-server.md)
+- [Modbus Guide](docs/modbus.md)
+- [MQTT Guide](docs/helps/mqtt.md)
 
 ## License
 
