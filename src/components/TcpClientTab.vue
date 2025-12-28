@@ -277,6 +277,9 @@ defineExpose({ addTerminalEntry });
               :disabled="tabState.isConnected"
               placeholder="localhost"
               class="field-input host-input"
+              autocomplete="off"
+              data-form-type="other"
+              spellcheck="false"
             />
             <span class="port-separator">:</span>
             <input
@@ -442,6 +445,9 @@ defineExpose({ addTerminalEntry });
               :placeholder="tabState.sendAsHex ? t.hexExample : t.enterMessage"
               :disabled="!tabState.isConnected || tabState.autoSendEnabled"
               @keydown="handleKeyDown"
+              autocomplete="off"
+              data-form-type="other"
+              spellcheck="false"
             />
             <button
               v-if="tabState.inputMessage"

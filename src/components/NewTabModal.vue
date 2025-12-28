@@ -123,6 +123,21 @@ function selectType(type) {
                 <p>{{ t.modbusSlaveDesc }}</p>
               </div>
             </div>
+
+            <!-- MQTT -->
+            <div class="type-card" @click="selectType(CONNECTION_TYPES.MQTT)">
+              <div class="type-icon mqtt">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                  <path d="M2 17l10 5 10-5"/>
+                  <path d="M2 12l10 5 10-5"/>
+                </svg>
+              </div>
+              <div class="type-info">
+                <h4>{{ t.connectionTypeMqtt || 'MQTT' }}</h4>
+                <p>{{ t.mqttDesc || 'Connect to MQTT broker for pub/sub messaging' }}</p>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -252,6 +267,11 @@ function selectType(type) {
 
 .type-icon.modbus-slave {
   background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+  color: white;
+}
+
+.type-icon.mqtt {
+  background: linear-gradient(135deg, #06b6d4 0%, #0891b2 100%);
   color: white;
 }
 

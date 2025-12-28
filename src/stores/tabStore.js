@@ -10,6 +10,7 @@ export const CONNECTION_TYPES = {
   TCP_SERVER: 'tcp_server',
   MODBUS: 'modbus',
   MODBUS_SLAVE: 'modbus_slave',
+  MQTT: 'mqtt',
 };
 
 // Singleton store instance
@@ -218,6 +219,66 @@ export function useTabStore() {
     });
   }
 
+  // MQTT tab state
+  function createMqttTabState(id) {
+    return reactive({
+      id,
+      connectionType: CONNECTION_TYPES.MQTT,
+      connectionId: id,
+      isConnected: false,
+
+      // Connection name (displayed on tab)
+      name: '',
+
+      // Broker config
+      brokerHost: 'broker.hivemq.com',
+      brokerPort: 1883,
+      clientId: `termipro-${Date.now()}`,
+      username: '',
+      password: '',
+      cleanSession: true,
+      keepAlive: 60,
+      protocol: 'tcp', // tcp, tls, ws, wss
+
+      // Last Will and Testament (LWT)
+      lwtTopic: '',
+      lwtMessage: '',
+      lwtQos: 0,
+      lwtRetain: false,
+
+      // Subscriptions [{topic, qos, color}]
+      subscriptions: [],
+      newSubscribeTopic: '',
+      newSubscribeQos: 0,
+
+      // Publish
+      publishTopic: '',
+      publishQos: 0,
+      publishRetain: false,
+      publishPayload: '',
+      publishFormat: 'text', // text, json, hex
+
+      // Terminal data [{type, topic, payload, qos, retain, timestamp, color}]
+      terminalData: [],
+      txCount: 0,
+      rxCount: 0,
+
+      // Auto-publish
+      autoPublishEnabled: false,
+      autoPublishInterval: 1000, // 100ms - 300000ms (5min)
+      autoPublishCount: 0,
+      autoPublishTimer: null,
+
+      // Display
+      displayMode: 'text', // text, hex
+      autoScroll: true,
+
+      // Status
+      connectionStatus: 'idle', // idle, connecting, connected, disconnected, error
+      statusMessage: null,
+    });
+  }
+
   // Create a new tab with specified connection type
   function createTab(connectionType = CONNECTION_TYPES.SERIAL) {
     if (!canAddTab.value) return null;
@@ -237,6 +298,9 @@ export function useTabStore() {
         break;
       case CONNECTION_TYPES.MODBUS_SLAVE:
         tabState = createModbusSlaveTabState(id);
+        break;
+      case CONNECTION_TYPES.MQTT:
+        tabState = createMqttTabState(id);
         break;
       default:
         tabState = createSerialTabState(id);
@@ -345,6 +409,17 @@ export function useTabStore() {
     return null;
   }
 
+  // Get MQTT tab by connection ID
+  function getMqttTabByConnectionId(connectionId) {
+    for (const [, tab] of tabs) {
+      if (tab.connectionType === CONNECTION_TYPES.MQTT &&
+          tab.connectionId === connectionId) {
+        return tab;
+      }
+    }
+    return null;
+  }
+
   // Check if port is already connected in any tab
   function isPortConnected(portName) {
     for (const [, tab] of tabs) {
@@ -387,6 +462,7 @@ export function useTabStore() {
     getTabByConnectionId,
     getModbusTabByConnectionId,
     getModbusSlaveTabByConnectionId,
+    getMqttTabByConnectionId,
     isPortConnected,
     getConnectedPorts,
 

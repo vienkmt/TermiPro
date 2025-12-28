@@ -12,6 +12,7 @@ import TcpClientTab from "./components/TcpClientTab.vue";
 import TcpServerTab from "./components/TcpServerTab.vue";
 import ModbusTab from "./components/ModbusTab.vue";
 import ModbusSlaveTab from "./components/ModbusSlaveTab.vue";
+import MqttTab from "./components/MqttTab.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import NewTabModal from "./components/NewTabModal.vue";
@@ -169,6 +170,59 @@ const translations = {
     startServerToBegin: "Khởi động server để bắt đầu",
     pleaseStartFirst: "Vui lòng khởi động server trước!",
     reconnecting: "Đang kết nối lại...",
+    // MQTT
+    connectionTypeMqtt: "MQTT Client",
+    mqttDesc: "Kết nối đến broker MQTT",
+    mqttName: "Tên kết nối",
+    mqttNamePlaceholder: "MQTT1",
+    mqttNameRequired: "Vui lòng nhập tên kết nối!",
+    mqttHost: "Server",
+    mqttHostPlaceholder: "broker.hivemq.com",
+    mqttPort: "Cổng",
+    mqttProtocol: "Giao thức",
+    mqttClientId: "Client ID",
+    mqttUsername: "Tên đăng nhập",
+    mqttPassword: "Mật khẩu",
+    mqttOptional: "Tùy chọn",
+    mqttConnect: "Kết nối",
+    mqttDisconnect: "Ngắt kết nối",
+    mqttSubscriptions: "Subscriptions",
+    mqttSubscribe: "Subscribe",
+    mqttUnsubscribe: "Hủy subscribe",
+    mqttTopicPlaceholder: "sensor/temperature/#",
+    mqttNoSubscriptions: "Bạn chưa subscription topic nào",
+    mqttPublish: "Publish",
+    mqttPublishTopic: "Topic",
+    mqttPublishMessage: "Tin nhắn",
+    mqttRetain: "Retain",
+    mqttAutoPublish: "Tự động gửi",
+    mqttInterval: "Chu kỳ",
+    mqttStart: "Bắt đầu",
+    mqttStop: "DỪNG",
+    mqttMessages: "Tin nhắn",
+    mqttAll: "Tất cả",
+    mqttReceived: "Đã nhận",
+    mqttPublished: "Đã gửi",
+    mqttClearMessages: "Xóa tin nhắn",
+    mqttDisplayFormat: "Định dạng hiển thị",
+    mqttPlaintext: "Văn bản",
+    mqttJson: "JSON",
+    mqttHex: "Hex",
+    mqttBase64: "Base64",
+    mqttQos: "QoS",
+    mqttQos0: "Nhiều nhất 1 lần",
+    mqttQos1: "Ít nhất 1 lần",
+    mqttQos2: "Đúng 1 lần",
+    mqttInvalidJson: "JSON không hợp lệ",
+    mqttInvalidBase64: "Base64 không hợp lệ",
+    mqttInvalidHex: "Hex không hợp lệ",
+    mqttNotConnected: "Chưa kết nối",
+    mqttEnterTopic: "Vui lòng nhập topic!",
+    mqttEnterMessage: "Vui lòng nhập tin nhắn!",
+    mqttNoMessages: "Chưa có tin nhắn nào",
+    mqttNoMessagesHint: "Hãy Subscribe và Publish để thấy nội dung",
+    mqttTopicPath: "topic/path",
+    mqttSend: "Gửi",
   },
   en: {
     // Status
@@ -320,6 +374,59 @@ const translations = {
     startServerToBegin: "Start server to begin",
     pleaseStartFirst: "Please start server first!",
     reconnecting: "Reconnecting...",
+    // MQTT
+    connectionTypeMqtt: "MQTT Client",
+    mqttDesc: "Connect to MQTT broker",
+    mqttName: "Connection Name",
+    mqttNamePlaceholder: "My MQTT Connection",
+    mqttNameRequired: "Please enter a connection name!",
+    mqttHost: "Host",
+    mqttHostPlaceholder: "broker.hivemq.com",
+    mqttPort: "Port",
+    mqttProtocol: "Protocol",
+    mqttClientId: "Client ID",
+    mqttUsername: "Username",
+    mqttPassword: "Password",
+    mqttOptional: "Optional",
+    mqttConnect: "Connect",
+    mqttDisconnect: "Disconnect",
+    mqttSubscriptions: "Subscriptions",
+    mqttSubscribe: "Subscribe",
+    mqttUnsubscribe: "Unsubscribe",
+    mqttTopicPlaceholder: "sensor/temperature/#",
+    mqttNoSubscriptions: "No subscriptions yet",
+    mqttPublish: "Publish",
+    mqttPublishTopic: "Topic",
+    mqttPublishMessage: "Message",
+    mqttRetain: "Retain",
+    mqttAutoPublish: "Auto Publish",
+    mqttInterval: "Interval",
+    mqttStart: "Start",
+    mqttStop: "STOP",
+    mqttMessages: "Messages",
+    mqttAll: "All",
+    mqttReceived: "Received",
+    mqttPublished: "Published",
+    mqttClearMessages: "Clear Messages",
+    mqttDisplayFormat: "Display Format",
+    mqttPlaintext: "Plaintext",
+    mqttJson: "JSON",
+    mqttHex: "Hex",
+    mqttBase64: "Base64",
+    mqttQos: "QoS",
+    mqttQos0: "At most once",
+    mqttQos1: "At least once",
+    mqttQos2: "Exactly once",
+    mqttInvalidJson: "Invalid JSON",
+    mqttInvalidBase64: "Invalid Base64",
+    mqttInvalidHex: "Invalid Hex",
+    mqttNotConnected: "Not connected",
+    mqttEnterTopic: "Please enter a topic!",
+    mqttEnterMessage: "Please enter a message!",
+    mqttNoMessages: "No messages yet",
+    mqttNoMessagesHint: "Subscribe to topics and start publishing",
+    mqttTopicPath: "topic/path",
+    mqttSend: "Send",
   }
 };
 
@@ -338,7 +445,7 @@ provide('toggleLanguage', toggleLanguage);
 
 // Tab store
 const tabStore = useTabStore();
-const { tabs, activeTabId, tabOrder, activeTab, canAddTab, createTab, closeTab, setActiveTab, getTabByPortName, getTabByConnectionId, getConnectedPorts } = tabStore;
+const { tabs, activeTabId, tabOrder, activeTab, canAddTab, createTab, closeTab, setActiveTab, getTabByPortName, getTabByConnectionId, getMqttTabByConnectionId, getConnectedPorts } = tabStore;
 
 // New tab modal state
 const showNewTabModal = ref(false);
@@ -384,6 +491,10 @@ let unlistenModbusSlaveStatus = null;
 let unlistenModbusSlaveRequest = null;
 let unlistenModbusSlaveDataChanged = null;
 let unlistenModbusSlaveTcpClientEvent = null;
+
+// MQTT event listeners
+let unlistenMqttData = null;
+let unlistenMqttStatus = null;
 
 // Batching for terminal updates (performance optimization)
 const pendingRxData = new Map(); // port_name -> [{data, timestamp}]
@@ -514,6 +625,16 @@ async function requestCloseTab(tabId) {
         await invoke("modbus_slave_stop", {
           connectionId: tab.slaveConnectionId || tab.connectionId,
         });
+      } else if (tab.connectionType === CONNECTION_TYPES.MQTT) {
+        // Stop auto-publish first if running
+        if (tab.autoPublishEnabled) {
+          tab.autoPublishEnabled = false;
+          if (tab.autoPublishTimer) {
+            clearInterval(tab.autoPublishTimer);
+            tab.autoPublishTimer = null;
+          }
+        }
+        await invoke("mqtt_disconnect", { connectionId: tab.connectionId });
       }
       tab.isConnected = false;
     } catch (error) {
@@ -830,6 +951,71 @@ async function handleModbusSlaveStop(tabId) {
     tab.connectedClients = [];
   } catch (error) {
     console.error("Modbus Slave stop error:", error);
+    alert("Error: " + error);
+  }
+}
+
+// ===================== MQTT HANDLERS =====================
+
+// MQTT connect
+async function handleMqttConnect(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  // Validate required fields
+  if (!tab.name?.trim()) {
+    alert(t.value.mqttNameRequired);
+    return;
+  }
+
+  try {
+    const config = {
+      connection_id: tab.connectionId,
+      broker_host: tab.brokerHost,
+      broker_port: tab.brokerPort,
+      client_id: tab.clientId,
+      username: tab.username || null,
+      password: tab.password || null,
+      clean_session: tab.cleanSession,
+      keep_alive_secs: tab.keepAlive,
+      protocol: tab.protocol,
+      // LWT
+      lwt_topic: tab.lwtTopic || null,
+      lwt_message: tab.lwtMessage || null,
+      lwt_qos: tab.lwtQos,
+      lwt_retain: tab.lwtRetain,
+    };
+
+    await invoke("mqtt_connect", { config });
+    // Status will be updated via event listener
+  } catch (error) {
+    console.error("MQTT connection error:", error);
+    tab.connectionStatus = 'error';
+    tab.statusMessage = String(error);
+    alert("Error: " + error);
+  }
+}
+
+// MQTT disconnect
+async function handleMqttDisconnect(tabId) {
+  const tab = tabs.get(tabId);
+  if (!tab) return;
+
+  try {
+    // Stop auto-publish if running
+    if (tab.autoPublishEnabled) {
+      tab.autoPublishEnabled = false;
+      if (tab.autoPublishTimer) {
+        clearInterval(tab.autoPublishTimer);
+        tab.autoPublishTimer = null;
+      }
+    }
+
+    await invoke("mqtt_disconnect", { connectionId: tab.connectionId });
+    tab.isConnected = false;
+    tab.connectionStatus = 'idle';
+  } catch (error) {
+    console.error("MQTT disconnect error:", error);
     alert("Error: " + error);
   }
 }
@@ -1321,6 +1507,59 @@ onMounted(async () => {
       }
     }
   });
+
+  // ===================== MQTT EVENT LISTENERS =====================
+
+  // MQTT data listener - received messages from subscribed topics
+  unlistenMqttData = await listen("mqtt-data", (event) => {
+    const { connection_id, topic, payload, qos, retain, timestamp, direction } = event.payload;
+    const tab = getMqttTabByConnectionId(connection_id);
+    // Only handle RX messages here - TX is handled by MqttTab component
+    if (tab && direction === 'rx') {
+      // Find subscription color if exists
+      const sub = tab.subscriptions.find(s => {
+        // Simple wildcard matching
+        const pattern = s.topic.replace(/\+/g, '[^/]+').replace(/#/g, '.*');
+        return new RegExp(`^${pattern}$`).test(topic);
+      });
+
+      tab.terminalData.push({
+        type: 'rx',
+        topic: topic,
+        payload: payload,
+        qos: qos,
+        retain: retain,
+        timestamp: new Date(timestamp).toLocaleTimeString(),
+        color: sub?.color || null,
+      });
+
+      tab.rxCount++;
+    }
+  });
+
+  // MQTT status listener
+  unlistenMqttStatus = await listen("mqtt-status", (event) => {
+    const { connection_id, status, message } = event.payload;
+    const tab = getMqttTabByConnectionId(connection_id);
+    if (tab) {
+      tab.connectionStatus = status;
+      tab.statusMessage = message || null;
+
+      if (status === "connected") {
+        tab.isConnected = true;
+      } else if (status === "disconnected" || status === "error") {
+        tab.isConnected = false;
+        // Stop auto-publish if running
+        if (tab.autoPublishEnabled) {
+          tab.autoPublishEnabled = false;
+          if (tab.autoPublishTimer) {
+            clearInterval(tab.autoPublishTimer);
+            tab.autoPublishTimer = null;
+          }
+        }
+      }
+    }
+  });
 });
 
 onUnmounted(async () => {
@@ -1374,6 +1613,14 @@ onUnmounted(async () => {
     unlistenModbusSlaveTcpClientEvent();
   }
 
+  // Cleanup MQTT event listeners
+  if (unlistenMqttData) {
+    unlistenMqttData();
+  }
+  if (unlistenMqttStatus) {
+    unlistenMqttStatus();
+  }
+
   // Clear update check interval
   if (updateCheckInterval) {
     clearInterval(updateCheckInterval);
@@ -1403,14 +1650,19 @@ onUnmounted(async () => {
           await invoke("modbus_slave_stop", {
             connectionId: tab.slaveConnectionId || tab.connectionId,
           });
+        } else if (tab.connectionType === CONNECTION_TYPES.MQTT) {
+          await invoke("mqtt_disconnect", { connectionId: tab.connectionId });
         }
       } catch (error) {
         console.error("Error closing connection:", error);
       }
     }
-    // Clear auto send timers
+    // Clear auto send/publish timers
     if (tab.autoSendTimer) {
       clearInterval(tab.autoSendTimer);
+    }
+    if (tab.autoPublishTimer) {
+      clearInterval(tab.autoPublishTimer);
     }
   }
 });
@@ -1537,6 +1789,16 @@ onUnmounted(async () => {
           @connect="handleModbusSlaveStart"
           @disconnect="handleModbusSlaveStop"
           @refresh-ports="refreshPorts"
+        />
+
+        <!-- MQTT Tab -->
+        <MqttTab
+          v-else-if="tab.connectionType === 'mqtt'"
+          v-show="tabId === activeTabId"
+          :tab-id="tabId"
+          :tab-state="tab"
+          @connect="handleMqttConnect"
+          @disconnect="handleMqttDisconnect"
         />
       </template>
     </div>

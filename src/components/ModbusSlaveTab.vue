@@ -834,6 +834,9 @@ onUnmounted(() => {
             v-model="tabState.bindAddress"
             :disabled="tabState.isConnected"
             placeholder="0.0.0.0"
+            autocomplete="off"
+            data-form-type="other"
+            spellcheck="false"
           />
         </div>
 

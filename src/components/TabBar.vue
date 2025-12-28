@@ -85,6 +85,15 @@ function getTabDisplayName(tabId) {
     return tab.mode === 'rtu' ? 'Slave RTU' : 'Slave TCP';
   }
 
+  // MQTT tab
+  if (tab.connectionType === 'mqtt') {
+    if (tab.isConnected) {
+      // Use custom name with MQTT prefix, fallback to broker host
+      return tab.name?.trim() ? `MQTT: ${tab.name.trim()}` : `MQTT:${tab.brokerHost}`;
+    }
+    return tab.name?.trim() ? `MQTT: ${tab.name.trim()}` : 'MQTT';
+  }
+
   return t.value.newTab;
 }
 
@@ -109,7 +118,8 @@ function isTabConnected(tabId) {
           'type-tcp-client': getConnectionType(tabId) === 'tcp_client',
           'type-tcp-server': getConnectionType(tabId) === 'tcp_server',
           'type-modbus': getConnectionType(tabId) === 'modbus',
-          'type-modbus-slave': getConnectionType(tabId) === 'modbus_slave'
+          'type-modbus-slave': getConnectionType(tabId) === 'modbus_slave',
+          'type-mqtt': getConnectionType(tabId) === 'mqtt'
         }"
         @click="emit('selectTab', tabId)"
       >
@@ -152,6 +162,12 @@ function isTabConnected(tabId) {
           <circle cx="7" cy="5" r="1" fill="currentColor"/>
           <circle cx="7" cy="12" r="1" fill="currentColor"/>
           <circle cx="7" cy="19" r="1" fill="currentColor"/>
+        </svg>
+        <!-- MQTT Icon -->
+        <svg v-else-if="getConnectionType(tabId) === 'mqtt'" class="tab-icon mqtt-icon" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+          <path d="M2 17l10 5 10-5"/>
+          <path d="M2 12l10 5 10-5"/>
         </svg>
         <span class="tab-name">{{ getTabDisplayName(tabId) }}</span>
         <span v-if="isTabConnected(tabId)" class="connection-dot"></span>
@@ -274,6 +290,10 @@ function isTabConnected(tabId) {
 
 .tab.type-modbus-slave.active .tab-icon {
   color: #6366f1;
+}
+
+.tab.type-mqtt.active .tab-icon {
+  color: #06b6d4;
 }
 
 .tab-name {

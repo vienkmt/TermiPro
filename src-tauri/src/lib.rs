@@ -14,8 +14,10 @@ use std::sync::atomic::{AtomicBool, AtomicU16, Ordering};
 
 mod modbus;
 mod modbus_slave;
+mod mqtt;
 use modbus::*;
 use modbus_slave::*;
+use mqtt::*;
 
 // Struct để lưu thông tin cổng serial
 #[derive(Debug, Serialize, Clone)]
@@ -2823,6 +2825,222 @@ fn modbus_slave_load_data(
     Ok(())
 }
 
+// ===================== MQTT COMMANDS =====================
+
+/// Connect to MQTT broker
+#[tauri::command]
+async fn mqtt_connect(
+    app: AppHandle,
+    state: State<'_, MqttState>,
+    config: MqttConfig,
+) -> Result<(), String> {
+    let connection_id = config.connection_id.clone();
+
+    // Check if connection already exists
+    {
+        let connections = state.connections.lock();
+        if connections.contains_key(&connection_id) {
+            return Err(format!("Connection {} already exists", connection_id));
+        }
+    }
+
+    // Connect to broker
+    let app_clone = app.clone();
+    let (handle, eventloop) = connect_mqtt(config, app_clone).await?;
+
+    let running = handle.running.clone();
+    let conn_id = connection_id.clone();
+    let app_for_loop = app.clone();
+
+    // Spawn eventloop in background
+    state.runtime.spawn(async move {
+        run_eventloop(eventloop, conn_id, running, app_for_loop).await;
+    });
+
+    // Store connection handle
+    state.connections.lock().insert(connection_id, handle);
+
+    Ok(())
+}
+
+/// Disconnect from MQTT broker
+#[tauri::command]
+async fn mqtt_disconnect(
+    state: State<'_, MqttState>,
+    connection_id: String,
+) -> Result<(), String> {
+    let handle = {
+        let mut connections = state.connections.lock();
+        connections.remove(&connection_id)
+    };
+
+    if let Some(h) = handle {
+        h.stop();
+        let _ = disconnect(&h.client).await;
+        Ok(())
+    } else {
+        Err(format!("Connection {} not found", connection_id))
+    }
+}
+
+/// Subscribe to MQTT topic
+#[tauri::command]
+async fn mqtt_subscribe(
+    state: State<'_, MqttState>,
+    connection_id: String,
+    topic: String,
+    qos: u8,
+) -> Result<(), String> {
+    // Clone client before releasing lock
+    let (client, subscriptions) = {
+        let connections = state.connections.lock();
+        let handle = connections
+            .get(&connection_id)
+            .ok_or_else(|| format!("Connection {} not found", connection_id))?;
+        (handle.client.clone(), handle.subscriptions.clone())
+    };
+
+    subscribe_topic(&client, &topic, qos).await?;
+
+    // Track subscription
+    subscriptions.lock().push(topic);
+
+    Ok(())
+}
+
+/// Unsubscribe from MQTT topic
+#[tauri::command]
+async fn mqtt_unsubscribe(
+    state: State<'_, MqttState>,
+    connection_id: String,
+    topic: String,
+) -> Result<(), String> {
+    // Clone client before releasing lock
+    let (client, subscriptions) = {
+        let connections = state.connections.lock();
+        let handle = connections
+            .get(&connection_id)
+            .ok_or_else(|| format!("Connection {} not found", connection_id))?;
+        (handle.client.clone(), handle.subscriptions.clone())
+    };
+
+    unsubscribe_topic(&client, &topic).await?;
+
+    // Remove from tracked subscriptions
+    subscriptions.lock().retain(|t| t != &topic);
+
+    Ok(())
+}
+
+/// Publish message to MQTT topic
+#[tauri::command]
+async fn mqtt_publish(
+    app: AppHandle,
+    state: State<'_, MqttState>,
+    connection_id: String,
+    topic: String,
+    payload: String,
+    qos: u8,
+    retain: bool,
+    is_hex: bool,
+) -> Result<(), String> {
+    let payload_bytes = if is_hex {
+        parse_hex_string(&payload)?
+    } else {
+        payload.as_bytes().to_vec()
+    };
+
+    // Clone client before releasing lock
+    let client = {
+        let connections = state.connections.lock();
+        let handle = connections
+            .get(&connection_id)
+            .ok_or_else(|| format!("Connection {} not found", connection_id))?;
+        handle.client.clone()
+    };
+
+    publish_message(&client, &topic, payload_bytes.clone(), qos, retain).await?;
+
+    // Emit TX message to frontend
+    let _ = app.emit(
+        "mqtt-data",
+        MqttMessage {
+            connection_id,
+            topic,
+            payload: payload_bytes,
+            qos,
+            retain,
+            timestamp: get_timestamp(),
+            direction: "tx".to_string(),
+        },
+    );
+
+    Ok(())
+}
+
+/// Check if MQTT connection is active
+#[tauri::command]
+fn mqtt_is_connected(state: State<MqttState>, connection_id: String) -> bool {
+    let connections = state.connections.lock();
+    if let Some(handle) = connections.get(&connection_id) {
+        handle.running.load(std::sync::atomic::Ordering::Relaxed)
+    } else {
+        false
+    }
+}
+
+/// Export MQTT messages to file
+#[tauri::command]
+fn mqtt_export_messages(
+    messages: Vec<MqttMessage>,
+    format: String,
+    file_path: String,
+) -> Result<(), String> {
+    use std::fs::File;
+    use std::io::Write;
+
+    let content = match format.as_str() {
+        "json" => serde_json::to_string_pretty(&messages)
+            .map_err(|e| format!("Serialize error: {}", e))?,
+        "csv" => {
+            let mut csv = String::from("timestamp,direction,topic,qos,retain,payload\n");
+            for msg in &messages {
+                let payload_str = String::from_utf8_lossy(&msg.payload);
+                // Escape quotes in payload for CSV
+                let escaped_payload = payload_str.replace('"', "\"\"");
+                csv.push_str(&format!(
+                    "{},{},{},{},{},\"{}\"\n",
+                    msg.timestamp, msg.direction, msg.topic, msg.qos, msg.retain, escaped_payload
+                ));
+            }
+            csv
+        }
+        "txt" => {
+            let mut txt = String::new();
+            for msg in &messages {
+                let payload_str = String::from_utf8_lossy(&msg.payload);
+                txt.push_str(&format!(
+                    "[{}] [{}] {} (QoS:{}, Retain:{}) {}\n",
+                    msg.timestamp,
+                    msg.direction.to_uppercase(),
+                    msg.topic,
+                    msg.qos,
+                    msg.retain,
+                    payload_str
+                ));
+            }
+            txt
+        }
+        _ => return Err("Invalid format. Use 'json', 'csv', or 'txt'".into()),
+    };
+
+    let mut file = File::create(&file_path).map_err(|e| format!("Create file error: {}", e))?;
+    file.write_all(content.as_bytes())
+        .map_err(|e| format!("Write error: {}", e))?;
+
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2833,6 +3051,7 @@ pub fn run() {
         .manage(TcpState::default())
         .manage(ModbusState::default())
         .manage(ModbusSlaveState::default())
+        .manage(MqttState::default())
         .invoke_handler(tauri::generate_handler![
             // Serial commands
             list_serial_ports,
@@ -2877,7 +3096,15 @@ pub fn run() {
             modbus_slave_reset_stats,
             modbus_slave_is_running,
             modbus_slave_save_data,
-            modbus_slave_load_data
+            modbus_slave_load_data,
+            // MQTT commands
+            mqtt_connect,
+            mqtt_disconnect,
+            mqtt_subscribe,
+            mqtt_unsubscribe,
+            mqtt_publish,
+            mqtt_is_connected,
+            mqtt_export_messages
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

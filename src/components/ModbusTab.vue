@@ -530,6 +530,9 @@ function removeWriteValue(index) {
             v-model="tabState.host"
             :disabled="tabState.isConnected"
             placeholder="localhost"
+            autocomplete="off"
+            data-form-type="other"
+            spellcheck="false"
           />
         </div>
 

@@ -195,6 +195,7 @@ impl SlaveStatistics {
         }
     }
 
+    #[allow(dead_code)]
     pub fn average_response_time_ms(&self) -> f64 {
         if self.response_time_count == 0 {
             0.0
@@ -218,6 +219,7 @@ pub struct ModbusSlaveTcpClient {
 // ===================== CONNECTION HANDLE =====================
 
 /// Slave connection handle
+#[allow(dead_code)]
 pub struct ModbusSlaveHandle {
     pub mode: ModbusMode,
     pub config: ModbusSlaveConfig,
@@ -269,6 +271,7 @@ impl ModbusSlaveHandle {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get_slave_id(&self) -> u8 {
         match &self.config {
             ModbusSlaveConfig::Rtu(c) => c.slave_id,
@@ -576,7 +579,7 @@ pub fn parse_tcp_request(frame: &[u8]) -> Result<(u16, ParsedRtuRequest), String
         }
         Some(FunctionCode::WriteMultipleCoils) => {
             let quantity = u16::from_be_bytes([frame[10], frame[11]]);
-            let byte_count = frame[12] as usize;
+            let _byte_count = frame[12] as usize;
 
             let mut coils = Vec::with_capacity(quantity as usize);
             for i in 0..quantity as usize {

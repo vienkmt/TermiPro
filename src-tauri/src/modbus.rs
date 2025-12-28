@@ -81,6 +81,7 @@ impl FunctionCode {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_read(&self) -> bool {
         matches!(
             self,
@@ -91,6 +92,7 @@ impl FunctionCode {
         )
     }
 
+    #[allow(dead_code)]
     pub fn is_coil_operation(&self) -> bool {
         matches!(
             self,
@@ -590,6 +592,7 @@ pub fn get_timestamp() -> u64 {
 }
 
 /// Format bytes as hex string for display
+#[allow(dead_code)]
 pub fn format_hex(data: &[u8]) -> String {
     data.iter()
         .map(|b| format!("{:02X}", b))

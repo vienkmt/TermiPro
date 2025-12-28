@@ -43,3 +43,5 @@ sercret key/
 secret key/
 secrets/
 .tauri/
+/.claude
+/plans
