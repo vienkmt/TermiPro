@@ -129,9 +129,11 @@ pub async fn connect_mqtt(
     mqtt_options.set_keep_alive(Duration::from_secs(config.keep_alive_secs as u64));
     mqtt_options.set_clean_session(config.clean_session);
 
-    // Authentication
-    if let (Some(user), Some(pass)) = (&config.username, &config.password) {
-        if !user.is_empty() && !pass.is_empty() {
+    // Authentication - set credentials if username is provided
+    // ThingsBoard and similar IoT platforms only need username (access token), password can be empty
+    if let Some(user) = &config.username {
+        if !user.is_empty() {
+            let pass = config.password.as_deref().unwrap_or("");
             mqtt_options.set_credentials(user, pass);
         }
     }
