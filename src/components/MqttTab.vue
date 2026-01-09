@@ -13,6 +13,9 @@ const t = inject('t');
 // Constants
 const MAX_TERMINAL_ENTRIES = 500;
 const MAX_VISIBLE_MESSAGES = 100;
+const MAX_RECENT_TOPICS = 5;
+const STORAGE_KEY_SUBSCRIBE = 'termipro_recent_subscribe_topics';
+const STORAGE_KEY_PUBLISH = 'termipro_recent_publish_topics';
 let messageIdCounter = 0;
 const TOPIC_COLORS = [
   '#ec4899', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444',
@@ -24,6 +27,71 @@ const terminalRef = ref(null);
 const showConnectionPanel = ref(true);
 const openDropdown = ref(null);
 const messageFilter = ref('all'); // 'all', 'rx', 'tx'
+
+// Recent topics (loaded from localStorage)
+// Subscribe: [{ topic: string, timestamp: number }]
+// Publish: [{ topic: string, payload: string, format: string, timestamp: number }]
+const recentSubscribeTopics = ref([]);
+const recentPublishTopics = ref([]);
+
+// Load recent topics from localStorage
+function loadRecentTopics() {
+  try {
+    const subData = localStorage.getItem(STORAGE_KEY_SUBSCRIBE);
+    const pubData = localStorage.getItem(STORAGE_KEY_PUBLISH);
+    if (subData) recentSubscribeTopics.value = JSON.parse(subData);
+    if (pubData) recentPublishTopics.value = JSON.parse(pubData);
+  } catch (e) {
+    console.error('Failed to load recent topics:', e);
+  }
+}
+
+// Save recent subscribe topics
+function saveRecentSubscribeTopic(topic) {
+  if (!topic?.trim()) return;
+  const existing = recentSubscribeTopics.value.findIndex(t => t.topic === topic);
+  if (existing !== -1) {
+    recentSubscribeTopics.value.splice(existing, 1);
+  }
+  recentSubscribeTopics.value.unshift({ topic, timestamp: Date.now() });
+  if (recentSubscribeTopics.value.length > MAX_RECENT_TOPICS) {
+    recentSubscribeTopics.value = recentSubscribeTopics.value.slice(0, MAX_RECENT_TOPICS);
+  }
+  localStorage.setItem(STORAGE_KEY_SUBSCRIBE, JSON.stringify(recentSubscribeTopics.value));
+}
+
+// Save recent publish topics with payload
+function saveRecentPublishTopic(topic, payload, format) {
+  if (!topic?.trim()) return;
+  const existing = recentPublishTopics.value.findIndex(t => t.topic === topic);
+  if (existing !== -1) {
+    recentPublishTopics.value.splice(existing, 1);
+  }
+  recentPublishTopics.value.unshift({ topic, payload, format, timestamp: Date.now() });
+  if (recentPublishTopics.value.length > MAX_RECENT_TOPICS) {
+    recentPublishTopics.value = recentPublishTopics.value.slice(0, MAX_RECENT_TOPICS);
+  }
+  localStorage.setItem(STORAGE_KEY_PUBLISH, JSON.stringify(recentPublishTopics.value));
+}
+
+// Remove recent topic
+function removeRecentSubscribeTopic(index) {
+  recentSubscribeTopics.value.splice(index, 1);
+  localStorage.setItem(STORAGE_KEY_SUBSCRIBE, JSON.stringify(recentSubscribeTopics.value));
+}
+
+function removeRecentPublishTopic(index) {
+  recentPublishTopics.value.splice(index, 1);
+  localStorage.setItem(STORAGE_KEY_PUBLISH, JSON.stringify(recentPublishTopics.value));
+}
+
+// Select recent publish topic (restore topic + payload)
+function selectRecentPublish(item) {
+  props.tabState.publishTopic = item.topic;
+  props.tabState.publishPayload = item.payload || '';
+  if (item.format) props.tabState.publishFormat = item.format;
+  openDropdown.value = null;
+}
 
 // Dropdown options
 const protocolOptions = [
@@ -49,6 +117,27 @@ const formatOptions = [
   { value: 'base64', label: 'Base64' },
 ];
 
+// Quick Topics publish topics with JSON templates
+const thingsboardTopics = [
+  { value: 'v1/devices/me/telemetry', label: 'Telemetry', desc: 'Send telemetry data', template: { temperature: 25 } },
+  { value: 'v1/devices/me/attributes', label: 'Attributes', desc: 'Publish client attributes', template: { firmware: "1.0.0" } },
+  { value: 'v1/devices/me/attributes/request/1', label: 'Request Attrs', desc: 'Request shared/client attributes', template: { sharedKeys: "config" } },
+  { value: 'v1/devices/me/rpc/request/+', label: 'RPC Request', desc: 'Subscribe to RPC from server' },
+  { value: 'v1/devices/me/rpc/response/+', label: 'RPC Response', desc: 'Send RPC response', template: { result: "ok" } },
+  { value: 'v1/gateway/telemetry', label: 'Gateway Telemetry', desc: 'Gateway device telemetry', template: { "Device A": [{ temperature: 25 }] } },
+  { value: 'v1/gateway/attributes', label: 'Gateway Attrs', desc: 'Gateway device attributes', template: { "Device A": { firmware: "1.0.0" } } },
+];
+
+// Quick Topics subscribe topics
+const thingsboardSubscribeTopics = [
+  { value: 'v1/devices/me/attributes', label: 'Attributes', desc: 'Receive shared attributes from server' },
+  { value: 'v1/devices/me/attributes/response/+', label: 'Attrs Response', desc: 'Response when requesting attributes' },
+  { value: 'v1/devices/me/rpc/request/+', label: 'RPC Request', desc: 'Receive RPC commands from server' },
+  { value: 'v1/devices/me/claim/response', label: 'Claim Response', desc: 'Claim device response' },
+  { value: 'v1/gateway/attributes', label: 'GW Attributes', desc: 'Receive attributes for gateway devices' },
+  { value: 'v1/gateway/rpc', label: 'GW RPC', desc: 'Receive RPC for gateway devices' },
+];
+
 // Dropdown handlers
 function toggleDropdown(name, event) {
   if (event) event.stopPropagation();
@@ -60,10 +149,38 @@ function selectOption(name, value) {
     case 'protocol': props.tabState.protocol = value; break;
     case 'subscribeQos': props.tabState.newSubscribeQos = value; break;
     case 'publishQos': props.tabState.publishQos = value; break;
-    case 'publishFormat': props.tabState.publishFormat = value; break;
+    case 'publishFormat':
+      props.tabState.publishFormat = value;
+      // Auto-beautify JSON when switching to JSON format
+      if (value === 'json') {
+        beautifyPayload();
+      }
+      break;
     case 'displayFormat': props.tabState.displayMode = value; break;
+    case 'subscribeTopic': props.tabState.newSubscribeTopic = value; break;
+    case 'publishTopic':
+      props.tabState.publishTopic = value;
+      // Auto-fill template if topic has one
+      const topic = thingsboardTopics.find(t => t.value === value);
+      if (topic?.template) {
+        props.tabState.publishPayload = JSON.stringify(topic.template, null, 2);
+        props.tabState.publishFormat = 'json';
+      }
+      break;
   }
   openDropdown.value = null;
+}
+
+// Beautify JSON payload
+function beautifyPayload() {
+  const payload = props.tabState.publishPayload.trim();
+  if (!payload) return;
+  try {
+    const obj = JSON.parse(payload);
+    props.tabState.publishPayload = JSON.stringify(obj, null, 2);
+  } catch {
+    // Not valid JSON, keep as is
+  }
 }
 
 function closeDropdowns() {
@@ -278,6 +395,8 @@ async function addSubscription() {
       qos: props.tabState.newSubscribeQos,
       color,
     });
+    // Save to recent topics
+    saveRecentSubscribeTopic(topic);
     props.tabState.newSubscribeTopic = '';
   } catch (error) {
     console.error('Subscribe error:', error);
@@ -326,6 +445,8 @@ async function publishMessage() {
       retain: props.tabState.publishRetain,
       timestamp: new Date().toLocaleTimeString(),
     });
+    // Save to recent topics with payload
+    saveRecentPublishTopic(topic, props.tabState.publishPayload, props.tabState.publishFormat);
   } catch (error) {
     console.error('Publish error:', error);
     addTerminalEntry({
@@ -442,6 +563,11 @@ watch(
   }
 );
 
+// Load recent topics on mount
+onMounted(() => {
+  loadRecentTopics();
+});
+
 // Cleanup on unmount
 onUnmounted(() => {
   stopAutoPublish();
@@ -478,7 +604,14 @@ defineExpose({ addTerminalEntry });
         </div>
         <div class="form-group">
           <label>{{ t.mqttHost }}</label>
-          <input v-model="tabState.brokerHost" :disabled="tabState.isConnected" :placeholder="t.mqttHostPlaceholder" autocomplete="off" data-form-type="other" spellcheck="false" />
+          <div class="input-with-clear">
+            <input v-model="tabState.brokerHost" :disabled="tabState.isConnected" :placeholder="t.mqttHostPlaceholder" autocomplete="off" data-form-type="other" spellcheck="false" />
+            <button v-if="tabState.brokerHost && !tabState.isConnected" class="clear-btn" @click="tabState.brokerHost = ''" type="button">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+              </svg>
+            </button>
+          </div>
         </div>
         <div class="form-row">
           <div class="form-group half">
@@ -525,15 +658,39 @@ defineExpose({ addTerminalEntry });
       <!-- New Subscription -->
       <div class="new-subscription">
         <div class="subscribe-input-row">
-          <input
-            v-model="tabState.newSubscribeTopic"
-            :placeholder="t.mqttTopicPlaceholder"
-            :disabled="!tabState.isConnected"
-            @keydown.enter="addSubscription"
-            autocomplete="off"
-            data-form-type="other"
-            spellcheck="false"
-          />
+          <div class="subscribe-input-wrapper">
+            <input
+              v-model="tabState.newSubscribeTopic"
+              :placeholder="t.mqttTopicPlaceholder"
+              :disabled="!tabState.isConnected"
+              @keydown.enter="addSubscription"
+              autocomplete="off"
+              data-form-type="other"
+              spellcheck="false"
+            />
+            <button type="button" class="subscribe-dropdown-btn" @click.stop="toggleDropdown('subscribeTopic', $event)" title="Quick Topics Topics">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div v-if="openDropdown === 'subscribeTopic'" class="subscribe-dropdown-menu" @click.stop>
+              <!-- Recent Topics -->
+              <template v-if="recentSubscribeTopics.length > 0">
+                <div class="subscribe-dropdown-header">Recent</div>
+                <div v-for="(item, idx) in recentSubscribeTopics" :key="'recent-sub-' + idx" class="subscribe-dropdown-option recent" @click="selectOption('subscribeTopic', item.topic)">
+                  <div class="recent-topic-row">
+                    <span class="recent-topic-text">{{ item.topic }}</span>
+                    <button type="button" class="remove-recent-btn" @click.stop="removeRecentSubscribeTopic(idx)" title="Remove">×</button>
+                  </div>
+                </div>
+              </template>
+              <!-- Quick Topics Topics -->
+              <div class="subscribe-dropdown-header">Quick Topics</div>
+              <div v-for="topic in thingsboardSubscribeTopics" :key="topic.value" class="subscribe-dropdown-option" :class="{ selected: tabState.newSubscribeTopic === topic.value }" @click="selectOption('subscribeTopic', topic.value)">
+                <span class="subscribe-topic-label">{{ topic.label }}</span>
+                <span class="subscribe-topic-path">{{ topic.value }}</span>
+                <span class="subscribe-topic-desc">{{ topic.desc }}</span>
+              </div>
+            </div>
+          </div>
           <div class="qos-selector" :class="{ disabled: !tabState.isConnected }" @click.stop="tabState.isConnected && toggleDropdown('subscribeQos', $event)" :title="qosDescriptions[tabState.newSubscribeQos]">
             <span class="qos-value">QoS {{ tabState.newSubscribeQos }}</span>
             <div v-if="openDropdown === 'subscribeQos'" class="qos-dropdown" @click.stop>
@@ -632,7 +789,32 @@ defineExpose({ addTerminalEntry });
       <div class="publish-bar">
         <!-- Combined Topic + Options Row -->
         <div class="publish-header">
-          <input v-model="tabState.publishTopic" :placeholder="t.mqttTopicPath" :disabled="!tabState.isConnected" class="topic-input" autocomplete="off" data-form-type="other" spellcheck="false" />
+          <div class="topic-input-wrapper">
+            <input v-model="tabState.publishTopic" :placeholder="t.mqttTopicPath" :disabled="!tabState.isConnected" class="topic-input" autocomplete="off" data-form-type="other" spellcheck="false" />
+            <button type="button" class="topic-dropdown-btn" @click.stop="toggleDropdown('publishTopic', $event)" title="Quick Topics Topics">
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+            <div v-if="openDropdown === 'publishTopic'" class="topic-dropdown-menu" @click.stop>
+              <!-- Recent Publish Topics -->
+              <template v-if="recentPublishTopics.length > 0">
+                <div class="topic-dropdown-header">Recent</div>
+                <div v-for="(item, idx) in recentPublishTopics" :key="'recent-pub-' + idx" class="topic-dropdown-option recent" @click="selectRecentPublish(item)">
+                  <div class="recent-topic-row">
+                    <span class="recent-topic-text">{{ item.topic }}</span>
+                    <button type="button" class="remove-recent-btn" @click.stop="removeRecentPublishTopic(idx)" title="Remove">×</button>
+                  </div>
+                  <span class="topic-payload-preview">{{ item.payload?.substring(0, 40) }}{{ item.payload?.length > 40 ? '...' : '' }}</span>
+                </div>
+              </template>
+              <!-- Quick Topics Topics -->
+              <div class="topic-dropdown-header">Quick Topics</div>
+              <div v-for="topic in thingsboardTopics" :key="topic.value" class="topic-dropdown-option" :class="{ selected: tabState.publishTopic === topic.value }" @click="selectOption('publishTopic', topic.value)">
+                <span class="topic-label">{{ topic.label }}</span>
+                <span class="topic-path">{{ topic.value }}</span>
+                <span class="topic-desc">{{ topic.desc }}</span>
+              </div>
+            </div>
+          </div>
 
           <!-- Format Dropdown -->
           <div class="toolbar-dropdown compact" :class="{ open: openDropdown === 'publishFormat' }" @click.stop="toggleDropdown('publishFormat', $event)">
@@ -840,6 +1022,36 @@ defineExpose({ addTerminalEntry });
   color: #94a3b8;
 }
 
+.input-with-clear {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-clear input {
+  padding-right: 32px;
+}
+
+.input-with-clear .clear-btn {
+  position: absolute;
+  right: 6px;
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.input-with-clear .clear-btn:hover {
+  color: #64748b;
+  background: #f1f5f9;
+}
+
 .form-row {
   display: flex;
   gap: 10px;
@@ -976,10 +1188,17 @@ defineExpose({ addTerminalEntry });
   align-items: center;
 }
 
+.subscribe-input-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
 .subscribe-input-row input {
   flex: 1;
   min-width: 0;
-  padding: 5px 8px;
+  padding: 5px 28px 5px 8px;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 0.7rem;
@@ -995,6 +1214,147 @@ defineExpose({ addTerminalEntry });
 .subscribe-input-row input:disabled {
   background: #f1f5f9;
   color: #94a3b8;
+}
+
+.subscribe-dropdown-btn {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.subscribe-dropdown-btn:hover {
+  background: #f1f5f9;
+  color: #0ea5e9;
+}
+
+.subscribe-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  min-width: 260px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18), 0 2px 8px rgba(0,0,0,0.1);
+  z-index: 200;
+  margin-top: 4px;
+}
+
+.subscribe-dropdown-header {
+  padding: 6px 10px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.subscribe-dropdown-option {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.subscribe-dropdown-option.recent {
+  padding: 5px 10px;
+}
+
+.subscribe-dropdown-option:last-child {
+  border-bottom: none;
+}
+
+.subscribe-dropdown-option:hover {
+  background: #f1f5f9;
+}
+
+.subscribe-dropdown-option.selected {
+  background: #0ea5e9;
+}
+
+.subscribe-dropdown-option.selected .subscribe-topic-label,
+.subscribe-dropdown-option.selected .subscribe-topic-path,
+.subscribe-dropdown-option.selected .subscribe-topic-desc {
+  color: white;
+}
+
+.subscribe-topic-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.subscribe-topic-path {
+  font-size: 0.6rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: #0284c7;
+  margin-top: 1px;
+}
+
+.subscribe-topic-desc {
+  font-size: 0.55rem;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+/* Recent topic row with remove button */
+.recent-topic-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.recent-topic-text {
+  font-size: 0.6rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: #1e293b;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  min-width: 0;
+}
+
+.remove-recent-btn {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  background: transparent;
+  border: none;
+  color: #cbd5e1;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-radius: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.remove-recent-btn:hover {
+  background: #fee2e2;
+  color: #ef4444;
 }
 
 /* QoS Selector */
@@ -1557,10 +1917,17 @@ defineExpose({ addTerminalEntry });
   margin-top: 5px;
 }
 
+.topic-input-wrapper {
+  position: relative;
+  flex: 1;
+  min-width: 100px;
+  display: flex;
+}
+
 .publish-header .topic-input {
   flex: 1;
   min-width: 100px;
-  padding: 6px 10px;
+  padding: 6px 30px 6px 10px;
   border: 1px solid #e2e8f0;
   border-radius: 6px;
   font-size: 0.75rem;
@@ -1576,6 +1943,124 @@ defineExpose({ addTerminalEntry });
 .publish-header .topic-input:disabled {
   background: #f1f5f9;
   color: #94a3b8;
+}
+
+.topic-dropdown-btn {
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: all 0.15s;
+}
+
+.topic-dropdown-btn:hover {
+  background: #f1f5f9;
+  color: #0ea5e9;
+}
+
+.topic-dropdown-menu {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  right: 0;
+  min-width: 280px;
+  max-height: 420px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  box-shadow: 0 -8px 24px rgba(0,0,0,0.18), 0 -2px 8px rgba(0,0,0,0.1);
+  z-index: 200;
+  margin-bottom: 4px;
+}
+
+.topic-dropdown-header {
+  padding: 6px 10px;
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #94a3b8;
+  background: #f8fafc;
+  border-bottom: 1px solid #e2e8f0;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.topic-dropdown-option {
+  display: flex;
+  flex-direction: column;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.topic-dropdown-option.recent {
+  padding: 5px 10px;
+}
+
+.topic-dropdown-option:last-child {
+  border-bottom: none;
+}
+
+.topic-dropdown-option:hover {
+  background: #f1f5f9;
+}
+
+.topic-dropdown-option.selected {
+  background: #0ea5e9;
+}
+
+.topic-dropdown-option.selected .topic-label,
+.topic-dropdown-option.selected .topic-path,
+.topic-dropdown-option.selected .topic-desc {
+  color: white;
+}
+
+.topic-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.topic-path {
+  font-size: 0.6rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: #0284c7;
+  margin-top: 1px;
+}
+
+.topic-desc {
+  font-size: 0.55rem;
+  color: #64748b;
+  margin-top: 1px;
+}
+
+.topic-payload-preview {
+  font-size: 0.55rem;
+  font-family: 'JetBrains Mono', monospace;
+  color: #475569;
+  margin-top: 3px;
+  padding: 3px 5px;
+  background: #f1f5f9;
+  border-radius: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topic-dropdown-option.selected .topic-payload-preview {
+  background: rgba(255,255,255,0.2);
+  color: rgba(255,255,255,0.9);
 }
 
 .toolbar-dropdown.compact {

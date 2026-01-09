@@ -374,7 +374,20 @@ fn open_port(
         .flow_control(FlowControl::None)
         .timeout(Duration::from_millis(5)) // Timeout ngắn để responsive
         .open()
-        .map_err(|e| format!("Không thể mở port {}: {}", port_name, e))?;
+        .map_err(|e| {
+            // Check if port is busy (used by another application)
+            let err_str = e.to_string().to_lowercase();
+            if err_str.contains("busy") || err_str.contains("resource busy")
+                || err_str.contains("access denied") || err_str.contains("permission denied")
+                || err_str.contains("device or resource busy")
+                || err_str.contains("already in use")
+                || err_str.contains("exclusive access") {
+                format!("BUSY:{}", port_name)
+            } else {
+                // Return detailed error for debugging
+                format!("ERROR:{}:{}", port_name, e)
+            }
+        })?;
 
     // Set DTR và RTS
     port.write_data_terminal_ready(config.dtr)

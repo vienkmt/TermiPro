@@ -57,6 +57,21 @@ function selectType(type) {
               </div>
             </div>
 
+            <!-- MQTT -->
+            <div class="type-card" @click="selectType(CONNECTION_TYPES.MQTT)">
+              <div class="type-icon mqtt">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                  <path d="M2 17l10 5 10-5"/>
+                  <path d="M2 12l10 5 10-5"/>
+                </svg>
+              </div>
+              <div class="type-info">
+                <h4>{{ t.connectionTypeMqtt || 'MQTT' }}</h4>
+                <p>{{ t.mqttDesc || 'Connect to MQTT broker for pub/sub messaging' }}</p>
+              </div>
+            </div>
+
             <!-- TCP Client -->
             <div class="type-card" @click="selectType(CONNECTION_TYPES.TCP_CLIENT)">
               <div class="type-icon tcp-client">
@@ -121,21 +136,6 @@ function selectType(type) {
               <div class="type-info">
                 <h4>{{ t.connectionTypeModbusSlave }}</h4>
                 <p>{{ t.modbusSlaveDesc }}</p>
-              </div>
-            </div>
-
-            <!-- MQTT -->
-            <div class="type-card" @click="selectType(CONNECTION_TYPES.MQTT)">
-              <div class="type-icon mqtt">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z"/>
-                  <path d="M2 17l10 5 10-5"/>
-                  <path d="M2 12l10 5 10-5"/>
-                </svg>
-              </div>
-              <div class="type-info">
-                <h4>{{ t.connectionTypeMqtt || 'MQTT' }}</h4>
-                <p>{{ t.mqttDesc || 'Connect to MQTT broker for pub/sub messaging' }}</p>
               </div>
             </div>
           </div>

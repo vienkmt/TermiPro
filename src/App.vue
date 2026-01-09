@@ -16,6 +16,7 @@ import MqttTab from "./components/MqttTab.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import UpdateModal from "./components/UpdateModal.vue";
 import NewTabModal from "./components/NewTabModal.vue";
+import Toast from "./components/Toast.vue";
 import { useTabStore, CONNECTION_TYPES } from "./stores/tabStore";
 
 // i18n Translations
@@ -58,6 +59,8 @@ const translations = {
     pleaseEnterMessage: "Vui lòng nhập tin nhắn để gửi tự động!",
     pleaseConnectFirst: "Vui lòng kết nối trước!",
     deviceDisconnected: "Thiết bị đã bị ngắt kết nối",
+    portBusy: "Cổng đang được sử dụng bởi ứng dụng khác",
+    cannotOpenPort: "Không thể mở cổng",
     // Tabs
     newTab: "Tab mới",
     closeTab: "Đóng tab",
@@ -262,6 +265,8 @@ const translations = {
     pleaseEnterMessage: "Please enter a message to auto send!",
     pleaseConnectFirst: "Please connect first!",
     deviceDisconnected: "Device has been disconnected",
+    portBusy: "Port is being used by another application",
+    cannotOpenPort: "Cannot open port",
     // Tabs
     newTab: "New Tab",
     closeTab: "Close tab",
@@ -460,6 +465,21 @@ const ports = ref([]);
 const showConfirmDialog = ref(false);
 const pendingCloseTabId = ref(null);
 
+// Toast notification state
+const toastVisible = ref(false);
+const toastMessage = ref('');
+const toastType = ref('error');
+
+function showToast(message, type = 'error') {
+  toastMessage.value = message;
+  toastType.value = type;
+  toastVisible.value = true;
+}
+
+function hideToast() {
+  toastVisible.value = false;
+}
+
 // Update state (Windows only)
 const updateAvailable = ref(false);
 const updateInfo = ref(null);
@@ -572,7 +592,21 @@ async function handleConnect(tabId) {
     tab.isConnected = true;
   } catch (error) {
     console.error("Connection error:", error);
-    alert("Error: " + error);
+    const errorStr = String(error).trim();
+    // Check if port is busy (used by another application)
+    if (errorStr.includes("BUSY:")) {
+      const portName = errorStr.split("BUSY:")[1] || tab.selectedPort;
+      showToast((t.value.portBusy || "Cổng đang bận") + ": " + portName, 'error');
+    } else if (errorStr.includes("ERROR:")) {
+      // Parse detailed error: ERROR:<port_name>:<error_message>
+      const afterError = errorStr.split("ERROR:")[1] || "";
+      const parts = afterError.split(":");
+      const portName = parts[0] || tab.selectedPort;
+      const errMsg = parts.slice(1).join(":") || "Unknown error";
+      showToast((t.value.cannotOpenPort || "Không thể mở cổng") + " " + portName + ": " + errMsg, 'error');
+    } else {
+      showToast("Error: " + error, 'error');
+    }
   }
 }
 
@@ -1828,6 +1862,14 @@ onUnmounted(async () => {
       :can-cancel="tabs.size > 0"
       @select="handleNewTabSelect"
       @cancel="cancelNewTabModal"
+    />
+
+    <!-- Toast Notification -->
+    <Toast
+      :visible="toastVisible"
+      :message="toastMessage"
+      :type="toastType"
+      @close="hideToast"
     />
   </div>
 </template>
