@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(flutter --version:*)",
+      "Bash(rustc:*)",
+      "Bash(cargo --version:*)",
+      "Bash(/Users/vienkmt/flutter/bin/flutter:*)",
+      "Bash(export PATH=\"/Users/vienkmt/flutter/bin:$PATH\")",
+      "Bash(flutter_rust_bridge_codegen generate:*)",
+      "Bash(cargo build:*)",
+      "Bash(flutter run:*)",
+      "Bash(flutter build:*)",
+      "Bash(open:*)",
+      "Bash(export PATH=\"$PATH:/Users/vienkmt/flutter/bin\")",
+      "Bash(flutter pub add:*)",
+      "Bash(wc:*)"
+    ]
+  }
+}

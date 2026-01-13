@@ -586,6 +586,7 @@ async function handleConnect(tabId) {
       parity: tab.parity,
       dtr: tab.dtr,
       rts: tab.rts,
+      line_ending: tab.lineEnding === 'None' ? null : tab.lineEnding,
     };
 
     await invoke("open_port", { config });

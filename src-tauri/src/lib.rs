@@ -38,6 +38,8 @@ pub struct SerialConfig {
     pub parity: String,
     pub dtr: bool,
     pub rts: bool,
+    #[serde(default)]
+    pub line_ending: Option<String>, // None, CR, LF, CRLF
 }
 
 // Dữ liệu nhận được từ serial
@@ -241,6 +243,11 @@ impl Default for ModbusSlaveState {
     }
 }
 
+// Helper function: tìm vị trí của subsequence trong slice
+fn find_subsequence(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    haystack.windows(needle.len()).position(|window| window == needle)
+}
+
 // Liệt kê các cổng serial có sẵn (hỗ trợ Windows, Linux, macOS)
 #[tauri::command]
 fn list_serial_ports() -> Result<Vec<PortInfo>, String> {
@@ -414,12 +421,21 @@ fn open_port(
     let app_clone = app.clone();
     let state_ptr = app.state::<SerialState>().inner() as *const SerialState as usize;
     let baud = config.baud_rate;
+    let line_ending = config.line_ending.clone();
 
     thread::spawn(move || {
         let mut buffer = [0u8; 4096]; // Tăng buffer để đọc nhiều data hơn mỗi lần
         let mut disconnect_reason: Option<String> = None;
 
-        // Tính gap timeout động dựa vào baud rate
+        // Xác định line ending bytes nếu có
+        let line_ending_bytes: Option<Vec<u8>> = match line_ending.as_deref() {
+            Some("CR") => Some(vec![0x0D]),
+            Some("LF") => Some(vec![0x0A]),
+            Some("CRLF") => Some(vec![0x0D, 0x0A]),
+            _ => None, // None hoặc "None" -> dùng gap timeout
+        };
+
+        // Tính gap timeout động dựa vào baud rate (chỉ dùng khi không có line ending)
         // Công thức: thời gian truyền 256 bytes, min 5ms, max 50ms
         // Cho phép message interval ~50ms+ được tách riêng
         let gap_timeout_ms: u64 = {
@@ -427,7 +443,7 @@ fn open_port(
             time_for_256b.clamp(5, 50)
         };
 
-        // Batching: tích lũy data và emit khi có "gap"
+        // Batching: tích lũy data và emit khi có "gap" hoặc line ending
         let mut accumulated_data: Vec<u8> = Vec::with_capacity(8192);
         let mut last_data_received = Instant::now();
         let mut has_pending_data = false;
@@ -471,22 +487,51 @@ fn open_port(
                 }
             }
 
-            // Emit khi có gap: có data pending và không nhận thêm data trong gap_timeout_ms
-            let should_emit = has_pending_data
-                && last_data_received.elapsed() > Duration::from_millis(gap_timeout_ms);
+            // Xử lý emit dựa trên line ending mode
+            if let Some(ref le_bytes) = line_ending_bytes {
+                // Line ending mode: emit từng dòng khi gặp line ending
+                while has_pending_data {
+                    // Tìm vị trí line ending trong accumulated_data
+                    if let Some(pos) = find_subsequence(&accumulated_data, le_bytes) {
+                        // Tìm thấy line ending, emit data bao gồm cả line ending
+                        let end_pos = pos + le_bytes.len();
+                        let line_data: Vec<u8> = accumulated_data.drain(..end_pos).collect();
 
-            if should_emit {
-                let data = SerialData {
-                    port_name: port_name_clone.clone(),
-                    data: accumulated_data.clone(),
-                    timestamp: std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)
-                        .unwrap()
-                        .as_millis() as u64,
-                };
-                let _ = app_clone.emit("serial-data", data);
-                accumulated_data.clear();
-                has_pending_data = false;
+                        let data = SerialData {
+                            port_name: port_name_clone.clone(),
+                            data: line_data,
+                            timestamp: std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap()
+                                .as_millis() as u64,
+                        };
+                        let _ = app_clone.emit("serial-data", data);
+
+                        // Kiểm tra còn data pending không
+                        has_pending_data = !accumulated_data.is_empty();
+                    } else {
+                        // Không tìm thấy line ending, chờ thêm data
+                        break;
+                    }
+                }
+            } else {
+                // Gap timeout mode: emit khi có gap trong data stream
+                let should_emit = has_pending_data
+                    && last_data_received.elapsed() > Duration::from_millis(gap_timeout_ms);
+
+                if should_emit {
+                    let data = SerialData {
+                        port_name: port_name_clone.clone(),
+                        data: accumulated_data.clone(),
+                        timestamp: std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis() as u64,
+                    };
+                    let _ = app_clone.emit("serial-data", data);
+                    accumulated_data.clear();
+                    has_pending_data = false;
+                }
             }
 
             // Không cần sleep vì read timeout đã cung cấp delay
